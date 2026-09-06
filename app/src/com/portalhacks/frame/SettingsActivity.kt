@@ -33,6 +33,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
@@ -41,6 +42,8 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Switch
 import androidx.compose.material3.SwitchDefaults
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -289,6 +292,59 @@ class SettingsActivity : ComponentActivity() {
                         "Clock & weather", ConfigReceiver.KEY_CLOCK, true,
                         subtitle = "Long-press the clock on the screensaver to move or resize it.",
                     ) { tick++ }
+                    Divider()
+                    var tempUnitId by remember {
+                        mutableStateOf(
+                            prefs.getString(ConfigReceiver.KEY_TEMP_UNIT, ConfigReceiver.DEFAULT_TEMP_UNIT)
+                                ?: ConfigReceiver.DEFAULT_TEMP_UNIT,
+                        )
+                    }
+                    CycleRow("Temperature unit", ConfigReceiver.tempUnitName(tempUnitId)) {
+                        val ids = ConfigReceiver.TEMP_UNITS.map { it.first }
+                        tempUnitId = ids[(ids.indexOf(tempUnitId).coerceAtLeast(0) + 1) % ids.size]
+                        prefs.edit().putString(ConfigReceiver.KEY_TEMP_UNIT, tempUnitId).apply()
+                        tick++
+                    }
+                    Divider()
+                    var city by remember {
+                        mutableStateOf(prefs.getString(ConfigReceiver.KEY_WEATHER_CITY, "") ?: "")
+                    }
+                    var cityDialog by remember { mutableStateOf(false) }
+                    CycleRow("Weather city", city.ifBlank { "Not set" }) { cityDialog = true }
+                    if (cityDialog) {
+                        var draft by remember(city) { mutableStateOf(city) }
+                        AlertDialog(
+                            onDismissRequest = { cityDialog = false },
+                            title = { Text("Weather city") },
+                            text = {
+                                Column {
+                                    Text(
+                                        "Set a city to show weather. Leave empty to turn weather off.",
+                                        color = PortalColors.Text.copy(alpha = 0.6f),
+                                        fontSize = 14.sp,
+                                    )
+                                    Spacer(Modifier.height(12.dp))
+                                    TextField(
+                                        value = draft,
+                                        onValueChange = { draft = it },
+                                        singleLine = true,
+                                        placeholder = { Text("e.g. London") },
+                                    )
+                                }
+                            },
+                            confirmButton = {
+                                TextButton(onClick = {
+                                    city = draft.trim()
+                                    prefs.edit().putString(ConfigReceiver.KEY_WEATHER_CITY, city).apply()
+                                    cityDialog = false
+                                    tick++
+                                }) { Text("Save") }
+                            },
+                            dismissButton = {
+                                TextButton(onClick = { cityDialog = false }) { Text("Cancel") }
+                            },
+                        )
+                    }
                     Divider()
                     var clockFaceId by remember {
                         mutableStateOf(

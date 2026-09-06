@@ -86,7 +86,6 @@ class SlideshowController(
     private val timeFmt: DateFormat
     private val dateFmt = SimpleDateFormat("EEE, MMM d", Locale.getDefault())
     private val monthYearFmt = SimpleDateFormat("MMM yyyy", Locale.getDefault())
-    private val fahrenheit = "US" == Locale.getDefault().country
     private val nightTint: View // warm overlay that fades in at night (Ambient-EQ-lite)
     private val ambientGlow: View // edge vignette tinted to the photo's mood color
     private var weather: Weather.Now? = null // current reading; null until loaded
@@ -110,6 +109,8 @@ class SlideshowController(
     private val kenBurns: Boolean // cinematic slow pan + zoom while held
     private val showClock: Boolean // clock + weather overlay
     private val clockFaceId: String // which overlay clock style to draw (see applyClockFace)
+    private val fahrenheit: Boolean // weather in °F (explicit setting; default °C)
+    private val weatherCity: String // weather city ("" = no weather)
     private val nightMode: Boolean // warm night dimming
     private val onThisDay: Boolean // surface "N years ago today" memories
     private val captions: Boolean // photo date captions (lower-right)
@@ -172,6 +173,9 @@ class SlideshowController(
         showClock = prefs.getBoolean(ConfigReceiver.KEY_CLOCK, ConfigReceiver.DEFAULT_CLOCK)
         clockFaceId = prefs.getString(ConfigReceiver.KEY_CLOCK_FACE, ConfigReceiver.DEFAULT_CLOCK_FACE)
             ?: ConfigReceiver.DEFAULT_CLOCK_FACE
+        fahrenheit = prefs.getString(ConfigReceiver.KEY_TEMP_UNIT, ConfigReceiver.DEFAULT_TEMP_UNIT) ==
+            ConfigReceiver.TEMP_FAHRENHEIT
+        weatherCity = prefs.getString(ConfigReceiver.KEY_WEATHER_CITY, "") ?: ""
         nightMode = prefs.getBoolean(ConfigReceiver.KEY_NIGHT, ConfigReceiver.DEFAULT_NIGHT)
         onThisDay = prefs.getBoolean(ConfigReceiver.KEY_ON_THIS_DAY, ConfigReceiver.DEFAULT_ON_THIS_DAY)
         captions = prefs.getBoolean(ConfigReceiver.KEY_CAPTIONS, ConfigReceiver.DEFAULT_CAPTIONS)
@@ -1656,7 +1660,7 @@ class SlideshowController(
 
     private fun refreshWeather() {
         loader.executor().execute {
-            val now = Weather.fetch(fahrenheit) ?: return@execute
+            val now = Weather.fetch(weatherCity, fahrenheit) ?: return@execute
             handler.post {
                 weather = now
                 updateClock()
