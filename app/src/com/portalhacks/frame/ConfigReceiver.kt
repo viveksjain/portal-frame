@@ -209,14 +209,12 @@ class ConfigReceiver : BroadcastReceiver() {
 
         // Explicit weather temperature units (id -> display name), in cycle order. Picked in
         // Settings → Clock & night; read by SlideshowController for the weather fetch.
-        val TEMP_UNITS = listOf(
-            TEMP_CELSIUS to "Celsius (°C)",
-            TEMP_FAHRENHEIT to "Fahrenheit (°F)",
-        )
+        val TEMP_UNITS = listOf(TEMP_CELSIUS to "Celsius (°C)", TEMP_FAHRENHEIT to "Fahrenheit (°F)")
 
         /** Display name for a temperature-unit id (falls back to Celsius for anything unknown). */
-        fun tempUnitName(id: String?): String =
-            TEMP_UNITS.firstOrNull { it.first == id }?.second ?: TEMP_UNITS.first().second
+        fun tempUnitName(id: String?): String {
+            return TEMP_UNITS.firstOrNull { it.first == id }?.second ?: TEMP_UNITS.first().second
+        }
 
         /** True for a recognised shared-album HTTPS link (Google Photos or iCloud). */
         fun isAlbumUrl(s: String?): Boolean = PhotoSources.matches(s)

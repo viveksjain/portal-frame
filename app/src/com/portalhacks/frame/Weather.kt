@@ -31,16 +31,20 @@ internal object Weather {
     }
 
     @JvmStatic
-    fun fetch(city: String, fahrenheit: Boolean): Now? {
+    fun fetch(
+        city: String,
+        fahrenheit: Boolean,
+    ): Now? {
         if (city.isBlank()) {
             return null // no city set → no weather
         }
         return try {
             val coords = geocode(city) ?: return null
-            val url = "https://api.open-meteo.com/v1/forecast?latitude=" + coords.first +
-                "&longitude=" + coords.second +
-                "&current=temperature_2m,weather_code,is_day" +
-                "&temperature_unit=" + (if (fahrenheit) "fahrenheit" else "celsius")
+            val url =
+                "https://api.open-meteo.com/v1/forecast?latitude=" + coords.first +
+                    "&longitude=" + coords.second +
+                    "&current=temperature_2m,weather_code,is_day" +
+                    "&temperature_unit=" + (if (fahrenheit) "fahrenheit" else "celsius")
             val cur = JSONObject(httpGet(url)).getJSONObject("current")
             val t = cur.getDouble("temperature_2m")
             val code = cur.optInt("weather_code", 0)
@@ -60,11 +64,10 @@ internal object Weather {
      */
     private fun geocode(city: String): Pair<String, String>? {
         return try {
-            val url = "https://geocoding-api.open-meteo.com/v1/search?name=" +
-                java.net.URLEncoder.encode(city.trim(), "UTF-8") +
-                "&count=1&language=en&format=json"
-            val first = JSONObject(httpGet(url)).optJSONArray("results")?.optJSONObject(0)
-                ?: return null
+            val query = java.net.URLEncoder.encode(city.trim(), "UTF-8")
+            val url = "https://geocoding-api.open-meteo.com/v1/search?name=$query&count=1"
+            val results = JSONObject(httpGet(url)).optJSONArray("results") ?: return null
+            val first = results.optJSONObject(0) ?: return null
             Pair(first.getDouble("latitude").toString(), first.getDouble("longitude").toString())
         } catch (e: Exception) {
             Log.w(TAG, "weather geocode failed for '$city'", e)
