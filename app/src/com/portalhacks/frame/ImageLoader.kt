@@ -289,7 +289,7 @@ class ImageLoader(context: Context) {
             out.flush()
             out.close()
             `in`.close()
-            return tmp.renameTo(dest)
+            return PhotoMetadataCache.finishDownload(cacheDir, urlStr, c, tmp, dest)
         } catch (e: Exception) {
             Log.e(TAG, "download failed $urlStr", e)
             return false

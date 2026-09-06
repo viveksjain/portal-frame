@@ -239,6 +239,7 @@ internal class PhotoDetailsOverlay(
 private class PhotoDetailsText(context: Context) {
     private val prefs = context.getSharedPreferences(ConfigReceiver.PREFS, Context.MODE_PRIVATE)
     private val uploadsPrefix = File(context.filesDir, "uploads").absolutePath + File.separator
+    private val photoCacheDir = File(context.cacheDir, "photos")
 
     fun render(slides: List<Slide>): String {
         if (slides.isEmpty()) {
@@ -247,9 +248,13 @@ private class PhotoDetailsText(context: Context) {
         return slides.take(MAX_PHOTOS).mapIndexed { index, slide ->
             buildString {
                 if (slides.size > 1) append("Photo ${index + 1}\n")
+                val origin = originFor(slide)
+                if (origin.googlePhotos) {
+                    bounded(PhotoMetadataCache.readName(photoCacheDir, slide.id))
+                        ?.let { append("Name: ").append(it).append('\n') }
+                }
                 append("Date: ").append(dateFor(slide.timeMs))
                 bounded(slide.caption)?.let { append("\nCaption: ").append(it) }
-                val origin = originFor(slide)
                 append("\nAlbum: ").append(origin.album)
                 append("\nSource: ").append(origin.source)
             }
@@ -267,15 +272,16 @@ private class PhotoDetailsText(context: Context) {
         for (url in Albums.enabled(prefs)) {
             val cached = AlbumCache.read(prefs, url)
             if (cached?.any { it.id == slide.id } == true) {
-                val source = bounded(PhotoSources.providerFor(url)?.displayName) ?: "Shared album"
+                val provider = PhotoSources.providerFor(url)
+                val source = bounded(provider?.displayName) ?: "Shared album"
                 val title = bounded(AlbumCache.title(prefs, url)) ?: source
-                return Origin(title, source)
+                return Origin(title, source, provider === GooglePhotosSource)
             }
         }
         return if (slide.id.startsWith(uploadsPrefix)) {
-            Origin("Photos added from phone", "Phone upload")
+            Origin("Photos added from phone", "Phone upload", false)
         } else {
-            Origin("Frame samples", "Built in")
+            Origin("Frame samples", "Built in", false)
         }
     }
 
@@ -284,7 +290,7 @@ private class PhotoDetailsText(context: Context) {
         return if (clean.length <= MAX_FIELD_CHARS) clean else clean.take(MAX_FIELD_CHARS - 1) + "…"
     }
 
-    private data class Origin(val album: String, val source: String)
+    private data class Origin(val album: String, val source: String, val googlePhotos: Boolean)
 
     private companion object {
         const val MAX_PHOTOS = 2
