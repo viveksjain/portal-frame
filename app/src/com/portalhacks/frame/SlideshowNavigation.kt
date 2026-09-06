@@ -4,6 +4,19 @@ import java.util.ArrayDeque
 
 /** Frame-level navigation for a slideshow whose frames may contain two consecutive photos. */
 internal object SlideshowNavigation {
+    fun frameSlides(
+        slides: List<Slide>,
+        start: Int,
+        pairs: Boolean,
+        screenPortrait: Boolean,
+    ): List<Slide> {
+        if (start !in slides.indices) {
+            return emptyList()
+        }
+        val paired = pairIndex(slides, start, pairs, screenPortrait)
+        return if (paired >= 0) listOf(slides[start], slides[paired]) else listOf(slides[start])
+    }
+
     fun pairIndex(
         slides: List<Slide>,
         start: Int,

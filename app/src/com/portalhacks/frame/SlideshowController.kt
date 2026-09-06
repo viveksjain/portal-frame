@@ -2,6 +2,7 @@ package com.portalhacks.frame
 
 import android.animation.ValueAnimator
 import android.content.Context
+import android.content.SharedPreferences
 import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Color
@@ -110,8 +111,7 @@ class SlideshowController(
     private val kenBurns: Boolean // cinematic slow pan + zoom while held
     private val showClock: Boolean // clock + weather overlay
     private val clockFaceId: String // which overlay clock style to draw (see applyClockFace)
-    private val fahrenheit: Boolean // weather in °F (explicit setting; default °C)
-    private val weatherCity: String // weather city ("" = no weather)
+    private val weatherRefreshState: WeatherRefreshState
     private val nightMode: Boolean // warm night dimming
     private val onThisDay: Boolean // surface "N years ago today" memories
     private val captions: Boolean // photo date captions (lower-right)
@@ -132,9 +132,10 @@ class SlideshowController(
     private var index = 0
     private var curIsPair = false // current frame shows a paired (two-photo) composite
     private var running = false
-    private var animGen = 0L
+    private val transitionState = SlideshowTransitionState()
     private var displayedSlides: List<Slide> = emptyList()
     private var pendingItems: PendingItems? = null
+    private val refreshQueue = SlideshowRefreshQueue()
     private val navigationHistory = SlideshowNavigationHistory()
     private var onDismiss: Runnable? = null
 
@@ -185,9 +186,7 @@ class SlideshowController(
         showClock = prefs.getBoolean(ConfigReceiver.KEY_CLOCK, ConfigReceiver.DEFAULT_CLOCK)
         clockFaceId = prefs.getString(ConfigReceiver.KEY_CLOCK_FACE, ConfigReceiver.DEFAULT_CLOCK_FACE)
             ?: ConfigReceiver.DEFAULT_CLOCK_FACE
-        fahrenheit = prefs.getString(ConfigReceiver.KEY_TEMP_UNIT, ConfigReceiver.DEFAULT_TEMP_UNIT) ==
-            ConfigReceiver.TEMP_FAHRENHEIT
-        weatherCity = prefs.getString(ConfigReceiver.KEY_WEATHER_CITY, "") ?: ""
+        weatherRefreshState = WeatherRefreshState(weatherSettings(prefs))
         nightMode = prefs.getBoolean(ConfigReceiver.KEY_NIGHT, ConfigReceiver.DEFAULT_NIGHT)
         onThisDay = prefs.getBoolean(ConfigReceiver.KEY_ON_THIS_DAY, ConfigReceiver.DEFAULT_ON_THIS_DAY)
         captions = prefs.getBoolean(ConfigReceiver.KEY_CAPTIONS, ConfigReceiver.DEFAULT_CAPTIONS)
@@ -521,6 +520,18 @@ class SlideshowController(
     fun setNote(text: String?) {
         noteText = text ?: ""
         applyNote()
+    }
+
+    /** Pick up weather city/unit changes made while the Settings Activity was in front. */
+    fun reloadWeatherPreferences() {
+        val prefs = context.getSharedPreferences(ConfigReceiver.PREFS, Context.MODE_PRIVATE)
+        if (weatherRefreshState.update(weatherSettings(prefs))) {
+            weather = null
+            updateClock()
+        }
+        if (showClock) {
+            startWeather()
+        }
     }
 
     /**
@@ -944,6 +955,7 @@ class SlideshowController(
         running = true
         details.dispose()
         pendingItems = null
+        refreshQueue.clear()
         navigationHistory.clear()
         startClock()
         if (showClock) {
@@ -979,9 +991,10 @@ class SlideshowController(
 
     fun stop() {
         running = false
-        animGen++
+        transitionState.invalidate()
         displayedSlides = emptyList()
         pendingItems = null
+        refreshQueue.clear()
         navigationHistory.clear()
         details.dispose()
         handler.removeCallbacks(autoTick)
@@ -1026,9 +1039,10 @@ class SlideshowController(
      * frame loads. Bumps the anim generation so any in-flight load is discarded.
      */
     fun blank() {
-        animGen++
+        transitionState.invalidate()
         displayedSlides = emptyList()
         pendingItems = null
+        refreshQueue.clear()
         navigationHistory.clear()
         details.dispose()
         handler.removeCallbacks(autoTick)
@@ -1097,6 +1111,7 @@ class SlideshowController(
             pendingItems = PendingItems(ArrayList(newItems), null, true)
             return // keep the inspected photo stable; apply on resume
         }
+        refreshQueue.clear()
         items = ArrayList(newItems)
         if (shuffle) {
             smartShuffle(items)
@@ -1123,7 +1138,7 @@ class SlideshowController(
         index = 0
         running = true
         Log.i(TAG, "Source switched to " + items.size + " album photos")
-        showImmediate(0)
+        renderRefresh(SlideshowRefreshTarget(index = 0, instant = true))
     }
 
     /**
@@ -1140,6 +1155,7 @@ class SlideshowController(
             pendingItems = PendingItems(ArrayList(newItems), showId, instant)
             return // keep the inspected photo stable; apply on resume
         }
+        refreshQueue.clear()
         items = ArrayList(newItems)
         if (shuffle) {
             smartShuffle(items)
@@ -1166,13 +1182,8 @@ class SlideshowController(
         if (!shimmerHidden) {
             shimmer.startSweep()
         }
-        if (instant) {
-            // Resume: show the photo straight away (no fade-from-black gap).
-            showImmediate(target)
-        } else {
-            // Live in-room push: crossfade from the current photo into the just-pushed one.
-            transitionTo(target, autoFadeMs)
-        }
+        // Resume renders straight away; a live in-room push crossfades from the current photo.
+        renderRefresh(SlideshowRefreshTarget(index = target, instant = instant))
     }
 
     /** The id of the photo currently displayed, or null if there isn't one. */
@@ -1182,6 +1193,7 @@ class SlideshowController(
         if (items.isEmpty()) {
             return
         }
+        refreshQueue.clear()
         navigationHistory.recordAdvance(index)
         val next = SlideshowNavigation.nextStart(items, index, pairs, screenPortrait)
         if (next < 0) {
@@ -1197,6 +1209,7 @@ class SlideshowController(
         if (items.isEmpty()) {
             return
         }
+        refreshQueue.clear()
         val fallback = SlideshowNavigation.previousStart(items, index, pairs, screenPortrait)
         val target = navigationHistory.previousOr(fallback)
         if (target < 0 || target >= items.size) {
@@ -1248,6 +1261,21 @@ class SlideshowController(
 
     private fun pauseForDetails() {
         handler.removeCallbacks(autoTick)
+        val restore = transitionState.pauseForDetails()
+        val restoreIndex =
+            restore?.firstOrNull()?.id?.let { id -> items.indexOfFirst { it.id == id } } ?: -1
+        if (restore != null) {
+            front.animate().cancel()
+            front.alpha = 0f
+            curIsPair = restore.size > 1
+            displayedSlides = restore
+            navigationHistory.clear()
+            if (restoreIndex >= 0) {
+                index = restoreIndex
+                info.text = captionOf(restoreIndex)
+            }
+            details.update(displayedSlides)
+        }
         try {
             kbAnim?.pause()
         } catch (_: Exception) {
@@ -1276,7 +1304,7 @@ class SlideshowController(
             return
         }
         if (shouldStartKenBurns()) {
-            startKenBurnsOnBack(animGen)
+            startKenBurnsOnBack(transitionState.current)
         }
     }
 
@@ -1288,12 +1316,12 @@ class SlideshowController(
             }
         } catch (_: Exception) {
             if (running && !clockOnly) {
-                startKenBurnsOnBack(animGen)
+                startKenBurnsOnBack(transitionState.current)
             }
             return
         }
         if (!kb.isStarted && shouldStartKenBurns()) {
-            startKenBurnsOnBack(animGen)
+            startKenBurnsOnBack(transitionState.current)
         }
     }
 
@@ -1304,17 +1332,19 @@ class SlideshowController(
         }
         if (pendingItems != null) {
             applyPendingItems()
+            return
+        }
+        val refresh = refreshQueue.pending
+        if (refresh != null) {
+            renderRefresh(refresh)
+            return
         }
         resumeKenBurns()
         scheduleAuto()
     }
 
     private fun slidesForFrame(start: Int): List<Slide> {
-        if (start !in items.indices) {
-            return emptyList()
-        }
-        val j = pairWith(start)
-        return if (j >= 0) listOf(items[start], items[j]) else listOf(items[start])
+        return SlideshowNavigation.frameSlides(items, start, pairs, screenPortrait)
     }
 
     private fun applyPendingItems() {
@@ -1336,26 +1366,26 @@ class SlideshowController(
         if (clockOnly) {
             return
         }
-        val preserveIdx = inspectedId?.let { id -> items.indexOfFirst { it.id == id } } ?: -1
-        if (preserveIdx >= 0) {
-            index = preserveIdx
-            curIsPair = pairWith(preserveIdx) >= 0
-            displayedSlides = slidesForFrame(preserveIdx)
-            if (items.indices.contains(preserveIdx)) {
-                info.text = captionOf(preserveIdx)
-            }
+        val target =
+            SlideshowRefresh.resolve(
+                slides = items,
+                inspectedId = inspectedId,
+                requestedId = pending.showId,
+                requestedInstant = pending.instant,
+            )
+        renderRefresh(target)
+    }
+
+    private fun renderRefresh(target: SlideshowRefreshTarget) {
+        val safeTarget = target.copy(index = target.index.coerceIn(items.indices))
+        val request = refreshQueue.queue(safeTarget)
+        index = safeTarget.index
+        running = true
+        val rendered = { refreshQueue.complete(request) }
+        if (safeTarget.instant) {
+            showImmediate(safeTarget.index, TransitionOrigin.REFRESH, rendered)
         } else {
-            val target =
-                pending.showId?.let { sid -> items.indexOfFirst { it.id == sid } }
-                    ?.takeIf { it >= 0 } ?: 0
-            val safe = target.coerceIn(items.indices)
-            index = safe
-            running = true
-            if (pending.instant) {
-                showImmediate(safe)
-            } else {
-                transitionTo(safe, autoFadeMs)
-            }
+            transitionTo(safeTarget.index, autoFadeMs, TransitionOrigin.REFRESH, rendered)
         }
     }
 
@@ -1374,17 +1404,21 @@ class SlideshowController(
                 next = index + step
             }
             navigationHistory.recordAdvance(index)
-            transitionTo(next, autoFadeMs)
+            transitionTo(next, autoFadeMs, TransitionOrigin.AUTOMATIC)
         }
     }
 
     /** Show item i directly (no crossfade) — used for the first frame. */
-    private fun showImmediate(i: Int) {
-        val gen = ++animGen
+    private fun showImmediate(
+        i: Int,
+        origin: TransitionOrigin = TransitionOrigin.SYSTEM,
+        onRendered: (() -> Unit)? = null,
+    ) {
+        val gen = transitionState.begin(origin, displayedSlides)
         val j = pairWith(i)
         val isPair = j >= 0
         val cb = ImageLoader.Callback { b ->
-            if (gen != animGen) {
+            if (!transitionState.isCurrent(gen)) {
                 return@Callback
             }
             if (b != null) {
@@ -1410,9 +1444,11 @@ class SlideshowController(
                 if (details.isOpen) {
                     details.update(displayedSlides)
                 }
+                onRendered?.invoke()
             }
             prefetchNext(nextStart(i, isPair))
             scheduleAuto()
+            transitionState.complete(gen)
         }
         if (isPair) {
             loader.loadPair(items[i].id, items[j].id, reqW, reqH, screenPortrait, cb)
@@ -1456,8 +1492,9 @@ class SlideshowController(
         next: Int,
         isPair: Boolean,
         gen: Long,
+        onRendered: (() -> Unit)?,
     ) {
-        if (gen != animGen) {
+        if (!transitionState.isCurrent(gen)) {
             return
         }
         back.setImageBitmap(bmp)
@@ -1468,38 +1505,43 @@ class SlideshowController(
         front.colorFilter = null
         startKenBurnsOnBack(gen)
         updateAmbient(bmp)
+        onRendered?.invoke()
         if (details.isOpen) {
             details.update(displayedSlides)
         }
         prefetchNext(nextStart(next, isPair))
         scheduleAuto()
+        transitionState.complete(gen)
     }
 
     /** Crossfade to start item [next]; loads async, safe to call mid-fade. */
     private fun transitionTo(
         next: Int,
         fadeMs: Long,
+        origin: TransitionOrigin = TransitionOrigin.USER,
+        onRendered: (() -> Unit)? = null,
     ) {
         if (items.isEmpty()) {
             return
         }
         handler.removeCallbacks(autoTick)
-        val gen = ++animGen
+        val gen = transitionState.begin(origin, displayedSlides)
         val j = pairWith(next)
         val isPair = j >= 0
         val cb = ImageLoader.Callback { bmp ->
-            if (gen != animGen) {
+            if (!transitionState.isCurrent(gen)) {
                 return@Callback // superseded by a newer request
             }
             if (bmp == null) {
                 index = next
                 curIsPair = isPair
                 scheduleAuto()
+                transitionState.complete(gen)
                 return@Callback
             }
             showIncomingFrame(bmp, next, isPair, j)
             front.animate().alpha(1f).setDuration(fadeMs).withEndAction {
-                settleTransition(bmp, next, isPair, gen)
+                settleTransition(bmp, next, isPair, gen, onRendered)
             }
         }
         if (isPair) {
@@ -1602,7 +1644,7 @@ class SlideshowController(
         a.duration = min(max(intervalMs, 1200L) + autoFadeMs, KEN_BURNS_MAX_MS)
         a.interpolator = LinearInterpolator()
         a.addUpdateListener { va ->
-            if (gen != animGen) {
+            if (!transitionState.isCurrent(gen)) {
                 va.cancel()
                 return@addUpdateListener
             }
@@ -1901,18 +1943,39 @@ class SlideshowController(
 
     private fun startWeather() {
         handler.removeCallbacks(weatherTick)
+        if (weatherRefreshState.settings.city.isBlank()) {
+            return
+        }
         // Fetch immediately if we have nothing yet; otherwise keep the periodic cadence.
         handler.postDelayed(weatherTick, if (weather == null) 0 else WEATHER_INTERVAL_MS)
     }
 
     private fun refreshWeather() {
+        val request = weatherRefreshState.beginRequest()
+        if (request.settings.city.isBlank()) {
+            return
+        }
         loader.executor().execute {
-            val now = Weather.fetch(weatherCity, fahrenheit) ?: return@execute
+            val now =
+                Weather.fetch(request.settings.city, request.settings.fahrenheit) ?: return@execute
             handler.post {
+                if (!weatherRefreshState.isCurrent(request)) {
+                    return@post
+                }
                 weather = now
                 updateClock()
             }
         }
+    }
+
+    private fun weatherSettings(prefs: SharedPreferences): WeatherSettings {
+        val fahrenheit =
+            prefs.getString(ConfigReceiver.KEY_TEMP_UNIT, ConfigReceiver.DEFAULT_TEMP_UNIT) ==
+                ConfigReceiver.TEMP_FAHRENHEIT
+        return WeatherSettings(
+            city = prefs.getString(ConfigReceiver.KEY_WEATHER_CITY, "") ?: "",
+            fahrenheit = fahrenheit,
+        )
     }
 
     private val fortuneTick = object : Runnable {
@@ -2125,7 +2188,7 @@ class SlideshowController(
         private const val TAP_SLOP = 30f
         private const val TAP_TIMEOUT_MS = 350L
         private const val LONG_PRESS_MS = 700L // hold to open Photos setup
-        private const val WEATHER_INTERVAL_MS = 30 * 60 * 1000L // refresh weather
+        private const val WEATHER_INTERVAL_MS = 60 * 60 * 1000L // refresh weather hourly
         private const val FORTUNE_INTERVAL_MS = 60 * 60 * 1000L // a fresh wisdom line each hour
 
         /**
