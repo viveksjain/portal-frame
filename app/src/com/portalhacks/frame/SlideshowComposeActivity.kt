@@ -141,6 +141,7 @@ class SlideshowComposeActivity : ComponentActivity() {
         isForeground = true
         // Avoid flashing a photo retained from the previous run while the first frame loads.
         controller.blank()
+        controller.reloadWeatherPreferences()
         // Re-apply the clock position/size (picks up a Settings "reset" done while away).
         controller.applyClockTransform()
         val prefs = getSharedPreferences(ConfigReceiver.PREFS, MODE_PRIVATE)
