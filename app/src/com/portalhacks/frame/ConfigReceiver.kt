@@ -53,6 +53,22 @@ class ConfigReceiver : BroadcastReceiver() {
                 Log.i("PortalFrame", "clock face set to: $face")
             }
         }
+        // Pick the weather temperature unit over ADB (also selectable in Settings):
+        // --es temp_unit fahrenheit
+        if (intent.hasExtra("temp_unit")) {
+            val unit = intent.getStringExtra("temp_unit")?.trim().orEmpty()
+            if (TEMP_UNITS.any { it.first == unit }) {
+                prefs.edit().putString(KEY_TEMP_UNIT, unit).apply()
+                Log.i("PortalFrame", "temperature unit set to: $unit")
+            }
+        }
+        // Pin the weather to a city over ADB (also selectable in Settings):
+        // --es weather_city "London"; clear with an empty string (weather off).
+        if (intent.hasExtra("weather_city")) {
+            val city = intent.getStringExtra("weather_city")?.trim() ?: ""
+            prefs.edit().putString(KEY_WEATHER_CITY, city).apply()
+            Log.i("PortalFrame", "weather city set to: '$city'")
+        }
         if (intent.hasExtra("remove_url")) {
             val url = intent.getStringExtra("remove_url")?.trim() ?: ""
             if (url.isNotEmpty()) {
@@ -125,6 +141,11 @@ class ConfigReceiver : BroadcastReceiver() {
         const val KEY_CLOCK = "clock"           // boolean: clock + weather overlay
         const val KEY_CLOCK_FACE = "clock_face" // which overlay clock style to draw (see CLOCK_FACES)
         const val DEFAULT_CLOCK_FACE = "classic"
+        const val KEY_TEMP_UNIT = "temp_unit" // explicit weather unit: "celsius" or "fahrenheit"
+        const val TEMP_CELSIUS = "celsius"
+        const val TEMP_FAHRENHEIT = "fahrenheit"
+        const val DEFAULT_TEMP_UNIT = TEMP_CELSIUS
+        const val KEY_WEATHER_CITY = "weather_city" // weather city ("" = weather off)
         const val KEY_CLOCK_LOW_LIGHT = "clock_low_light" // boolean: clock-only in low light
         const val KEY_NIGHT = "night"           // boolean: warm night dimming
         const val KEY_ON_THIS_DAY = "on_this_day" // boolean: surface memories
@@ -185,6 +206,15 @@ class ConfigReceiver : BroadcastReceiver() {
         /** Display name for a clock-face id (falls back to Classic for anything unknown). */
         fun clockFaceName(id: String?): String =
             CLOCK_FACES.firstOrNull { it.first == id }?.second ?: CLOCK_FACES.first().second
+
+        // Explicit weather temperature units (id -> display name), in cycle order. Picked in
+        // Settings → Clock & night; read by SlideshowController for the weather fetch.
+        val TEMP_UNITS = listOf(TEMP_CELSIUS to "Celsius (°C)", TEMP_FAHRENHEIT to "Fahrenheit (°F)")
+
+        /** Display name for a temperature-unit id (falls back to Celsius for anything unknown). */
+        fun tempUnitName(id: String?): String {
+            return TEMP_UNITS.firstOrNull { it.first == id }?.second ?: TEMP_UNITS.first().second
+        }
 
         /** True for a recognised shared-album HTTPS link (Google Photos or iCloud). */
         fun isAlbumUrl(s: String?): Boolean = PhotoSources.matches(s)

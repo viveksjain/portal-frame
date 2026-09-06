@@ -10,9 +10,11 @@ import kotlin.math.roundToInt
 
 /**
  * Tiny dependency-free current-weather lookup for the clock overlay. No API key:
- * approximate location comes from the IP (GeoJS) and the reading from Open-Meteo.
- * Both endpoints are HTTPS, so no cleartext-traffic manifest change is needed.
- * Best-effort — returns null on any failure and the clock simply shows no weather.
+ * the city (set in Settings → Clock & night) is resolved via Open-Meteo geocoding
+ * and the reading comes from Open-Meteo. Both endpoints are HTTPS, so no
+ * cleartext-traffic manifest change is needed.
+ * Best-effort — returns null on any failure (including no city set) and the clock
+ * simply shows no weather.
  */
 internal object Weather {
 
@@ -24,23 +26,25 @@ internal object Weather {
         @JvmField val temp: Int,
         @JvmField val moon: Boolean, // clear/mainly-clear at night → draw a blue crescent
     ) {
-        /** e.g. "☀️ 72°" */
+        /** e.g. "☀️ 22°" */
         fun label(): String = "$emoji $temp°"
     }
 
     @JvmStatic
-    fun fetch(fahrenheit: Boolean): Now? {
+    fun fetch(
+        city: String,
+        fahrenheit: Boolean,
+    ): Now? {
+        if (city.isBlank()) {
+            return null // no city set → no weather
+        }
         return try {
-            val geo = JSONObject(httpGet("https://get.geojs.io/v1/ip/geo.json"))
-            val lat = geo.optString("latitude", "")
-            val lon = geo.optString("longitude", "")
-            if (lat.isEmpty() || lon.isEmpty()) {
-                return null
-            }
-            val url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat +
-                "&longitude=" + lon +
-                "&current=temperature_2m,weather_code,is_day" +
-                "&temperature_unit=" + (if (fahrenheit) "fahrenheit" else "celsius")
+            val coords = geocode(city) ?: return null
+            val url =
+                "https://api.open-meteo.com/v1/forecast?latitude=" + coords.first +
+                    "&longitude=" + coords.second +
+                    "&current=temperature_2m,weather_code,is_day" +
+                    "&temperature_unit=" + (if (fahrenheit) "fahrenheit" else "celsius")
             val cur = JSONObject(httpGet(url)).getJSONObject("current")
             val t = cur.getDouble("temperature_2m")
             val code = cur.optInt("weather_code", 0)
@@ -49,6 +53,24 @@ internal object Weather {
             Now(emojiFor(code, day), t.roundToInt(), moon)
         } catch (e: Exception) {
             Log.w(TAG, "weather fetch failed", e)
+            null
+        }
+    }
+
+    /**
+     * Resolve a city to (latitude, longitude) via Open-Meteo's free geocoding API
+     * (HTTPS, no key — same provider as the forecast). Returns null when the city
+     * can't be resolved.
+     */
+    private fun geocode(city: String): Pair<String, String>? {
+        return try {
+            val query = java.net.URLEncoder.encode(city.trim(), "UTF-8")
+            val url = "https://geocoding-api.open-meteo.com/v1/search?name=$query&count=1"
+            val results = JSONObject(httpGet(url)).optJSONArray("results") ?: return null
+            val first = results.optJSONObject(0) ?: return null
+            Pair(first.getDouble("latitude").toString(), first.getDouble("longitude").toString())
+        } catch (e: Exception) {
+            Log.w(TAG, "weather geocode failed for '$city'", e)
             null
         }
     }
