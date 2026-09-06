@@ -67,7 +67,10 @@ on as the screensaver.
 - 🕰️ **Live overlays** — clock & weather, photo date captions, shuffle, adjustable timing and transitions.
 - 🎬 **Cinematic touches** — side-by-side portraits, pan/zoom (Ken Burns), auto-enhance, ambient color,
   night dimming, and "On This Day" memories — all toggleable.
-- 👆 **Touch controls** — **swipe** to change photo, **tap** to dismiss, **long-press** to open setup.
+- 👆 **Touch controls** — **swipe** to change photo, **tap** for photo details and a temporary pause,
+  **tap again** to resume, **Close** to exit, and **long-press** to open setup.
+- ▶️ **Start anytime** — launch the slideshow on demand from Frame's setup screen, even without
+  configuring Frame as the system screensaver.
 
 ## 🛠️ For developers
 

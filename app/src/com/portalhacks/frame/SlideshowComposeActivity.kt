@@ -35,7 +35,7 @@ import androidx.core.content.ContextCompat
  * marquee features for no user-facing gain). The album fetch/cache/refresh and
  * night-dimming logic live here in Kotlin.
  *
- * This is the screensaver target ([FrameDreamService] launches it).
+ * [FrameDreamService] launches this slideshow when the device idles; [SettingsActivity] starts it on demand.
  */
 class SlideshowComposeActivity : ComponentActivity() {
 
@@ -45,9 +45,9 @@ class SlideshowComposeActivity : ComponentActivity() {
 
     private var currentAlbums: List<String> = emptyList()
     private var currentIds: List<String> = ArrayList()
+    private var isForeground = false
 
-    // "AirDrop for Portal": photos arrive via the always-on DropServerService, which
-    // broadcasts ACTION_UPLOAD when one lands so we can show it immediately.
+    // Refresh the slideshow immediately when the always-on drop service receives a photo.
     private var uploadReceiverRegistered = false
     private val uploadReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, i: Intent?) {
@@ -93,12 +93,12 @@ class SlideshowComposeActivity : ComponentActivity() {
         val root = FrameLayout(this)
         controller = SlideshowController(this, root, loader).apply {
             setOnDismiss {
-                // Tap dismisses the screensaver. The dream launched us in our own task
-                // (FLAG_ACTIVITY_NEW_TASK) on top of whatever app the user had open, so
-                // just tearing this task down hands control back to that app — matching
-                // the stock Portal screensaver. (We used to force CATEGORY_HOME here,
-                // which always bounced the user to the launcher instead; see issue #3.)
-                finishAndRemoveTask()
+                // Dream exits its independent task; an on-demand launch returns to Settings.
+                if (intent.getBooleanExtra(EXTRA_FROM_DREAM, false)) {
+                    finishAndRemoveTask()
+                } else {
+                    finish()
+                }
             }
             // Portal's launcher won't show sideloaded app icons, so long-press the
             // slideshow to reach the setup/settings screen.
@@ -138,8 +138,8 @@ class SlideshowComposeActivity : ComponentActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Clear any photo retained from a previous run so re-entering the frame
-        // doesn't flash the old image before the first new frame loads.
+        isForeground = true
+        // Avoid flashing a photo retained from the previous run while the first frame loads.
         controller.blank()
         // Re-apply the clock position/size (picks up a Settings "reset" done while away).
         controller.applyClockTransform()
@@ -203,10 +203,10 @@ class SlideshowComposeActivity : ComponentActivity() {
     }
 
     override fun onPause() {
+        isForeground = false
         super.onPause()
         sensorManager.unregisterListener(lightListener)
         handler.removeCallbacks(refreshTick)
-        // Leave DropServerService running so photos can still arrive while we're away.
         if (uploadReceiverRegistered) {
             unregisterReceiver(uploadReceiver)
             uploadReceiverRegistered = false
@@ -219,7 +219,7 @@ class SlideshowComposeActivity : ComponentActivity() {
      * straight to the newest one (the in-room "tada"), instead of waiting for the rotation.
      */
     private fun onLocalUploadChanged() {
-        if (!::controller.isInitialized) return
+        if (!isForeground || !::controller.isInitialized) return
         val prefs = getSharedPreferences(ConfigReceiver.PREFS, MODE_PRIVATE)
         val local = LocalUploads.slides(this)
         val merged = currentAlbums.flatMap { AlbumCache.read(prefs, it) ?: emptyList() } + local
@@ -258,11 +258,11 @@ class SlideshowComposeActivity : ComponentActivity() {
                     if (album.slides.isNotEmpty()) {
                         AlbumCache.write(prefs, url, album.slides, album.title)
                     }
-                    runOnUiThread { rebuildFromCaches(showHint) }
+                    runOnUiThread { if (isForeground) rebuildFromCaches(showHint) }
                 } catch (e: Exception) {
                     Log.e(TAG, "album fetch failed: $url", e)
                     if (showHint) {
-                        runOnUiThread { rebuildFromCaches(true) }
+                        runOnUiThread { if (isForeground) rebuildFromCaches(true) }
                     }
                 }
             }
@@ -296,6 +296,8 @@ class SlideshowComposeActivity : ComponentActivity() {
     }
 
     companion object {
+        const val EXTRA_FROM_DREAM = "from_dream"
+
         private const val TAG = "PortalFrame"
         private const val REFRESH_INTERVAL_MS = 20 * 60 * 1000L // 20 min
 

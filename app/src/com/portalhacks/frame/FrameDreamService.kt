@@ -12,22 +12,26 @@ import android.util.Log
  * instead of rendering inside the dream, we use the dream purely as the
  * "device went idle" trigger: launch the full-screen interactive
  * [SlideshowComposeActivity] (which renders and handles swipe/tap reliably) and exit
- * the dream. The Activity keeps the screen on, so nothing loops; a tap finishes
- * the Activity -> device idles -> dream fires again -> relaunch.
+ * the dream. The Activity keeps the screen on, so nothing loops; its Close control removes
+ * the independent task and returns to the app that was visible before the device idled.
  */
 class FrameDreamService : DreamService() {
 
     override fun onDreamingStarted() {
         super.onDreamingStarted()
         try {
-            val i = Intent(this, SlideshowComposeActivity::class.java)
+            val i =
+                Intent(this, SlideshowComposeActivity::class.java).putExtra(
+                    SlideshowComposeActivity.EXTRA_FROM_DREAM,
+                    true,
+                )
             // CLEAR_TASK (not CLEAR_TOP) so the slideshow starts in a fresh task with no retained
             // task snapshot — the framework's black starting window (Theme.Frame) then covers the
             // home screen during the hand-off instead of either home or a stale photo flashing.
             i.addFlags(
                 Intent.FLAG_ACTIVITY_NEW_TASK
                     or Intent.FLAG_ACTIVITY_CLEAR_TASK
-                    or Intent.FLAG_ACTIVITY_NO_ANIMATION
+                    or Intent.FLAG_ACTIVITY_NO_ANIMATION,
             )
             startActivity(i)
             Log.i(TAG, "Dream launched SlideshowComposeActivity")

@@ -58,7 +58,7 @@ import kotlin.math.min
  * Touch handling is distance-based (works for slow finger swipes):
  *   - drag left  -> next image
  *   - drag right -> previous image
- *   - tap        -> dismiss (runs onDismiss)
+ *   - tap        -> show/hide paused photo details
  */
 class SlideshowController(
     private val context: Context,
@@ -89,6 +89,7 @@ class SlideshowController(
     private val fahrenheit = "US" == Locale.getDefault().country
     private val nightTint: View // warm overlay that fades in at night (Ambient-EQ-lite)
     private val ambientGlow: View // edge vignette tinted to the photo's mood color
+    private val details: PhotoDetailsOverlay
     private var weather: Weather.Now? = null // current reading; null until loaded
     private val moonDrawable: Drawable // blue crescent, clear nights
     private val handler = Handler(Looper.getMainLooper())
@@ -131,7 +132,18 @@ class SlideshowController(
     private var curIsPair = false // current frame shows a paired (two-photo) composite
     private var running = false
     private var animGen = 0L
+    private var displayedSlides: List<Slide> = emptyList()
+    private var pendingItems: PendingItems? = null
+    private val navigationHistory = SlideshowNavigationHistory()
     private var onDismiss: Runnable? = null
+
+    /** Deferred album/upload update received while details are visible; only the latest is kept. */
+    private data class PendingItems(
+        val items: List<Slide>,
+        val showId: String?,
+        val instant: Boolean,
+    )
+
     private var onSettings: Runnable? = null
     private var clockOnly = false // low-light mode: black screen, clock only
 
@@ -468,6 +480,13 @@ class SlideshowController(
         root.addView(noteBox)
         root.addView(binBox)
         root.addView(buildTouchOverlay())
+        details =
+            PhotoDetailsOverlay(
+                context = context,
+                onPauseChanged = ::onDetailsPauseChanged,
+                onClose = { onDismiss?.run() },
+            )
+        root.addView(details.view)
         applyNote()
         clockBox.post { applyClockTransformNow() } // apply saved position/size once laid out
 
@@ -792,6 +811,9 @@ class SlideshowController(
                         pinching = false
                         v.parent?.requestDisallowInterceptTouchEvent(true)
                         cancelLong()
+                        if (details.isOpen) {
+                            details.interact()
+                        }
                         if (!editingClock && isOnNote(e.x, e.y)) {
                             // Touch started on the note → drag it directly (no long-press); the
                             // bin appears so it can be dropped there to dismiss.
@@ -891,10 +913,12 @@ class SlideshowController(
                             val dt = e.eventTime - downTime
                             if (abs(dx) > SWIPE_MIN_DISTANCE && abs(dx) > abs(dy)) {
                                 if (dx < 0) showNext() else showPrevious()
-                            } else if (abs(dx) < TAP_SLOP && abs(dy) < TAP_SLOP &&
-                                dt < TAP_TIMEOUT_MS && onDismiss != null
-                            ) {
-                                onDismiss?.run()
+                            } else if (isDetailsTap(dx, dy, dt)) {
+                                if (details.isOpen) {
+                                    details.hide()
+                                } else {
+                                    details.show(displayedSlides)
+                                }
                             }
                         }
                         return true
@@ -914,6 +938,9 @@ class SlideshowController(
 
     fun start() {
         running = true
+        details.dispose()
+        pendingItems = null
+        navigationHistory.clear()
         startClock()
         if (showClock) {
             startWeather()
@@ -948,6 +975,11 @@ class SlideshowController(
 
     fun stop() {
         running = false
+        animGen++
+        displayedSlides = emptyList()
+        pendingItems = null
+        navigationHistory.clear()
+        details.dispose()
         handler.removeCallbacks(autoTick)
         handler.removeCallbacks(clockTick)
         handler.removeCallbacks(secondsTick)
@@ -991,6 +1023,11 @@ class SlideshowController(
      */
     fun blank() {
         animGen++
+        displayedSlides = emptyList()
+        pendingItems = null
+        navigationHistory.clear()
+        details.dispose()
+        handler.removeCallbacks(autoTick)
         kbAnim?.let {
             it.cancel()
             kbAnim = null
@@ -1025,6 +1062,8 @@ class SlideshowController(
         clockOnly = on
         applyNote() // hide the note in clock-only mode, restore it otherwise
         if (on) {
+            details.dispose()
+            pendingItems = null
             handler.removeCallbacks(autoTick) // pause advancing
             shimmer.stopSweep()
             blank() // photos -> black
@@ -1050,6 +1089,10 @@ class SlideshowController(
         if (newItems == null || newItems.isEmpty()) {
             return
         }
+        if (details.isOpen) {
+            pendingItems = PendingItems(ArrayList(newItems), null, true)
+            return // keep the inspected photo stable; apply on resume
+        }
         items = ArrayList(newItems)
         if (shuffle) {
             smartShuffle(items)
@@ -1058,6 +1101,7 @@ class SlideshowController(
             promoteOnThisDay(items)
         }
         remote = true
+        navigationHistory.clear()
         if (clockOnly) {
             return // keep showing the clock; the new photos display when light returns
         }
@@ -1088,6 +1132,10 @@ class SlideshowController(
         if (newItems.isNullOrEmpty()) {
             return
         }
+        if (details.isOpen) {
+            pendingItems = PendingItems(ArrayList(newItems), showId, instant)
+            return // keep the inspected photo stable; apply on resume
+        }
         items = ArrayList(newItems)
         if (shuffle) {
             smartShuffle(items)
@@ -1096,6 +1144,7 @@ class SlideshowController(
             promoteOnThisDay(items)
         }
         remote = true
+        navigationHistory.clear()
         // Set index/running BEFORE the clock-only return so that when light returns,
         // setClockOnly(false) calls showImmediate(index) with a valid index for the new list.
         val target = items.indexOfFirst { it.id == showId }.let { if (it < 0) 0 else it }
@@ -1126,26 +1175,188 @@ class SlideshowController(
     fun currentId(): String? = items.getOrNull(index)?.id
 
     fun showNext() {
-        if (items.isNotEmpty()) {
-            transitionTo(nextStart(index, curIsPair), SWIPE_FADE_MS)
+        if (items.isEmpty()) {
+            return
         }
+        navigationHistory.recordAdvance(index)
+        val next = SlideshowNavigation.nextStart(items, index, pairs, screenPortrait)
+        if (next < 0) {
+            return
+        }
+        if (details.isOpen) {
+            details.interact()
+        }
+        transitionTo(next, SWIPE_FADE_MS)
     }
 
     fun showPrevious() {
-        if (items.isNotEmpty()) {
-            transitionTo((index - 1 + items.size) % items.size, SWIPE_FADE_MS)
+        if (items.isEmpty()) {
+            return
         }
+        val fallback = SlideshowNavigation.previousStart(items, index, pairs, screenPortrait)
+        val target = navigationHistory.previousOr(fallback)
+        if (target < 0 || target >= items.size) {
+            return
+        }
+        navigationHistory.recordPrevious(displayed = target)
+        if (details.isOpen) {
+            details.interact()
+        }
+        transitionTo(target, SWIPE_FADE_MS)
+    }
+
+    private fun canAutoAdvance(): Boolean {
+        if (!running) {
+            return false
+        }
+        if (details.isOpen) {
+            return false
+        }
+        if (clockOnly) {
+            return false
+        }
+        return items.size > 1
+    }
+
+    private fun isDetailsTap(
+        dx: Float,
+        dy: Float,
+        dt: Long,
+    ): Boolean {
+        if (clockOnly) {
+            return false
+        }
+        if (displayedSlides.isEmpty()) {
+            return false
+        }
+        if (abs(dx) >= TAP_SLOP || abs(dy) >= TAP_SLOP) {
+            return false
+        }
+        return dt < TAP_TIMEOUT_MS
     }
 
     private fun scheduleAuto() {
         handler.removeCallbacks(autoTick)
-        if (running && items.size > 1) {
+        if (canAutoAdvance()) {
             handler.postDelayed(autoTick, intervalMs)
         }
     }
 
+    private fun pauseForDetails() {
+        handler.removeCallbacks(autoTick)
+        try {
+            kbAnim?.pause()
+        } catch (_: Exception) {
+            kbAnim?.cancel()
+            kbAnim = null
+        }
+    }
+
+    private fun shouldStartKenBurns(): Boolean {
+        if (kbPath == null) {
+            return false
+        }
+        if (!running) {
+            return false
+        }
+        if (clockOnly) {
+            return false
+        }
+        return displayedSlides.isNotEmpty()
+    }
+
+    private fun resumeKenBurns() {
+        val kb = kbAnim
+        if (kb != null) {
+            resumeExistingKenBurns(kb)
+            return
+        }
+        if (shouldStartKenBurns()) {
+            startKenBurnsOnBack(animGen)
+        }
+    }
+
+    private fun resumeExistingKenBurns(kb: ValueAnimator) {
+        try {
+            if (kb.isPaused) {
+                kb.resume()
+                return
+            }
+        } catch (_: Exception) {
+            if (running && !clockOnly) {
+                startKenBurnsOnBack(animGen)
+            }
+            return
+        }
+        if (!kb.isStarted && shouldStartKenBurns()) {
+            startKenBurnsOnBack(animGen)
+        }
+    }
+
+    private fun onDetailsPauseChanged(paused: Boolean) {
+        if (paused) {
+            pauseForDetails()
+            return
+        }
+        if (pendingItems != null) {
+            applyPendingItems()
+        }
+        resumeKenBurns()
+        scheduleAuto()
+    }
+
+    private fun slidesForFrame(start: Int): List<Slide> {
+        if (start !in items.indices) {
+            return emptyList()
+        }
+        val j = pairWith(start)
+        return if (j >= 0) listOf(items[start], items[j]) else listOf(items[start])
+    }
+
+    private fun applyPendingItems() {
+        val pending = pendingItems ?: return
+        pendingItems = null
+        if (pending.items.isEmpty()) {
+            return
+        }
+        val inspectedId = displayedSlides.firstOrNull()?.id ?: currentId()
+        items = ArrayList(pending.items)
+        if (shuffle) {
+            smartShuffle(items)
+        }
+        if (onThisDay) {
+            promoteOnThisDay(items)
+        }
+        remote = true
+        navigationHistory.clear()
+        if (clockOnly) {
+            return
+        }
+        val preserveIdx = inspectedId?.let { id -> items.indexOfFirst { it.id == id } } ?: -1
+        if (preserveIdx >= 0) {
+            index = preserveIdx
+            curIsPair = pairWith(preserveIdx) >= 0
+            displayedSlides = slidesForFrame(preserveIdx)
+            if (items.indices.contains(preserveIdx)) {
+                info.text = captionOf(preserveIdx)
+            }
+        } else {
+            val target =
+                pending.showId?.let { sid -> items.indexOfFirst { it.id == sid } }
+                    ?.takeIf { it >= 0 } ?: 0
+            val safe = target.coerceIn(items.indices)
+            index = safe
+            running = true
+            if (pending.instant) {
+                showImmediate(safe)
+            } else {
+                transitionTo(safe, autoFadeMs)
+            }
+        }
+    }
+
     private val autoTick = Runnable {
-        if (running && items.isNotEmpty()) {
+        if (running && items.isNotEmpty() && !details.isOpen) {
             val step = if (curIsPair) 2 else 1
             val next: Int
             if (index + step >= items.size) {
@@ -1158,6 +1369,7 @@ class SlideshowController(
             } else {
                 next = index + step
             }
+            navigationHistory.recordAdvance(index)
             transitionTo(next, autoFadeMs)
         }
     }
@@ -1177,6 +1389,7 @@ class SlideshowController(
                 front.alpha = 0f
                 index = i
                 curIsPair = isPair
+                displayedSlides = slidesForFrame(i)
                 status.text = ""
                 info.text = captionOf(i)
                 noteShown(i)
@@ -1190,6 +1403,9 @@ class SlideshowController(
                 updateAmbient(b)
                 enhanceFilter = if (enhance) makeEnhance(b) else null
                 back.colorFilter = enhanceFilter
+                if (details.isOpen) {
+                    details.update(displayedSlides)
+                }
             }
             prefetchNext(nextStart(i, isPair))
             scheduleAuto()
@@ -1201,8 +1417,65 @@ class SlideshowController(
         }
     }
 
+    private fun showIncomingFrame(
+        bmp: Bitmap,
+        next: Int,
+        isPair: Boolean,
+        j: Int,
+    ) {
+        front.animate().cancel()
+        front.setImageBitmap(bmp)
+        front.alpha = 0f
+        index = next
+        curIsPair = isPair
+        displayedSlides = slidesForFrame(next)
+        status.text = ""
+        info.text = captionOf(next)
+        noteShown(next)
+        if (isPair) {
+            noteShown(j)
+        }
+        hideShimmer()
+        if (details.isOpen) {
+            details.update(displayedSlides)
+        }
+        // Incoming image shows the path's START transform during the fade; when it
+        // settles onto `back` we hand off at the same transform and animate to the end.
+        kbPath = newKenBurnsPath(bmp)
+        applyKenBurnsStart(front, kbPath)
+        enhanceFilter = if (enhance) makeEnhance(bmp) else null
+        front.colorFilter = enhanceFilter
+    }
+
+    private fun settleTransition(
+        bmp: Bitmap,
+        next: Int,
+        isPair: Boolean,
+        gen: Long,
+    ) {
+        if (gen != animGen) {
+            return
+        }
+        back.setImageBitmap(bmp)
+        applyKenBurnsStart(back, kbPath)
+        back.colorFilter = enhanceFilter
+        front.alpha = 0f
+        applyKenBurnsStart(front, null) // reset incoming view for reuse
+        front.colorFilter = null
+        startKenBurnsOnBack(gen)
+        updateAmbient(bmp)
+        if (details.isOpen) {
+            details.update(displayedSlides)
+        }
+        prefetchNext(nextStart(next, isPair))
+        scheduleAuto()
+    }
+
     /** Crossfade to start item [next]; loads async, safe to call mid-fade. */
-    private fun transitionTo(next: Int, fadeMs: Long) {
+    private fun transitionTo(
+        next: Int,
+        fadeMs: Long,
+    ) {
         if (items.isEmpty()) {
             return
         }
@@ -1220,38 +1493,9 @@ class SlideshowController(
                 scheduleAuto()
                 return@Callback
             }
-            front.animate().cancel()
-            front.setImageBitmap(bmp)
-            front.alpha = 0f
-            index = next
-            curIsPair = isPair
-            status.text = ""
-            info.text = captionOf(next)
-            noteShown(next)
-            if (isPair) {
-                noteShown(j)
-            }
-            hideShimmer()
-            // Incoming image shows the path's START transform during the fade; when it
-            // settles onto `back` we hand off at the same transform and animate to the end.
-            kbPath = newKenBurnsPath(bmp)
-            applyKenBurnsStart(front, kbPath)
-            enhanceFilter = if (enhance) makeEnhance(bmp) else null
-            front.colorFilter = enhanceFilter
+            showIncomingFrame(bmp, next, isPair, j)
             front.animate().alpha(1f).setDuration(fadeMs).withEndAction {
-                if (gen != animGen) {
-                    return@withEndAction
-                }
-                back.setImageBitmap(bmp)
-                applyKenBurnsStart(back, kbPath)
-                back.colorFilter = enhanceFilter
-                front.alpha = 0f
-                applyKenBurnsStart(front, null) // reset incoming view for reuse
-                front.colorFilter = null
-                startKenBurnsOnBack(gen)
-                updateAmbient(bmp)
-                prefetchNext(nextStart(next, isPair))
-                scheduleAuto()
+                settleTransition(bmp, next, isPair, gen)
             }
         }
         if (isPair) {
@@ -1342,6 +1586,9 @@ class SlideshowController(
         kbAnim?.let {
             it.cancel()
             kbAnim = null
+        }
+        if (details.isOpen) {
+            return // paused: keep the static start frame until details close
         }
         val p = kbPath ?: return
         val a = ValueAnimator.ofFloat(0f, 1f)

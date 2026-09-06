@@ -4,8 +4,9 @@ Turn your **Meta Portal** into a digital photo frame. It can play your **Google 
 **iCloud** shared albums, and/or photos you **push straight from your phone** over Wi‑Fi — whenever
 it's idle. You install a ready-made `Frame-*.apk` — you don't need to build anything.
 
-> New here? You'll do three things once: **install** the app, **add your photos** (a shared album,
-> a phone push, or both), and **turn it on as the screensaver**. After that it just runs.
+> New here? **Install** the app and **add your photos** (a shared album, a phone push, or both).
+> You can start the slideshow whenever you like, and optionally turn it on as the screensaver so it
+> also runs automatically when the Portal is idle.
 
 ---
 
@@ -114,6 +115,11 @@ scanned the on-screen QR can add photos.
 > tap **Manage photos** to see them all in a grid and **delete** any (or **Remove all**).
 
 ### Step 2 — Turn Frame on as the screensaver
+You can tap **Start slideshow** on the setup screen at any time. This works even if Frame is not
+configured as the system screensaver; **Close** or Android Back returns you to setup.
+
+To also start Frame automatically when the Portal is idle:
+
 1. On the setup screen, tap **Use as screensaver**.
 2. In the list that opens, choose **Frame**.
 3. Done — your photos will now appear whenever the Portal is idle.
@@ -153,11 +159,13 @@ your photos still appear when the Portal is idle.
 
 ## Part 3 — Using Frame day to day
 
-- **It runs automatically.** When the Portal sits idle, Frame fades through your album. Touch the
-  screen (or talk to the Portal) to go back to normal.
+- **Start it anytime.** Open Frame and tap **Start slideshow**, or let it start automatically when
+  the Portal sits idle if you configured it as the screensaver.
 - **Touch controls while photos are showing:**
   - **Swipe left / right** — next / previous photo
-  - **Single tap** — dismiss (wake the Portal)
+  - **Single tap** — show the current photo's date, caption, album, and source, and pause playback
+  - **Tap again** — hide the details and resume playback (details also fade after 10 seconds idle)
+  - **Close** — exit the slideshow
   - **Long‑press** — open the Frame setup screen
 - **Add photos anytime.** New photos you add to the shared album (in Google Photos or iCloud) show
   up on the Portal automatically (it re-checks each time it goes idle). Or **push a photo from your

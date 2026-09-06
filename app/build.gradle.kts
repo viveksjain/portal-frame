@@ -49,6 +49,8 @@ android {
         assets.setSrcDirs(listOf("assets"))
     }
 
+    sourceSets["test"].java.setSrcDirs(listOf("tests"))
+
     signingConfigs {
         create("release") {
             val ksPath = releaseSecret("FRAME_KEYSTORE", "storeFile")
@@ -109,6 +111,7 @@ detekt {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     implementation(files("libs/zxing-core-3.5.3.jar"))
 
     implementation(platform(libs.compose.bom))

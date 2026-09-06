@@ -350,6 +350,7 @@ class SettingsActivity : ComponentActivity() {
                     if (hasAlbum) "Your photos" else "Show your photos",
                     color = PortalColors.Text, fontSize = 30.sp, fontWeight = FontWeight.Bold,
                 )
+                PrimaryBtn("Start slideshow") { startActivity(Intent(ctx, SlideshowComposeActivity::class.java)) }
 
                 if (twoCol) {
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.Top) {
