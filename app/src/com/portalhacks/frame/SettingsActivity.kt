@@ -402,10 +402,6 @@ class SettingsActivity : ComponentActivity() {
                     .verticalScroll(rememberScrollState())
                     .padding(horizontal = sidePad, vertical = 72.dp),
             ) {
-                Text(
-                    if (hasAlbum) "Your photos" else "Show your photos",
-                    color = PortalColors.Text, fontSize = 30.sp, fontWeight = FontWeight.Bold,
-                )
                 PrimaryBtn("Start slideshow") { startActivity(Intent(ctx, SlideshowComposeActivity::class.java)) }
 
                 if (twoCol) {
