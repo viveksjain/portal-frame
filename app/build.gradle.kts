@@ -112,6 +112,8 @@ detekt {
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    // Android supplies org.json on-device; local JVM tests need its real implementation.
+    testImplementation("org.json:json:20260719")
     implementation(files("libs/zxing-core-3.5.3.jar"))
 
     implementation(platform(libs.compose.bom))

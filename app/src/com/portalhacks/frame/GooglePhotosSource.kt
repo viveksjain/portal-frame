@@ -6,6 +6,7 @@ import java.io.ByteArrayOutputStream
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 import java.util.LinkedHashSet
 import java.util.regex.Pattern
 
@@ -19,7 +20,6 @@ import java.util.regex.Pattern
  * back to bundled images when this returns empty.
  */
 internal object GooglePhotosSource : PhotoProvider {
-
     override val displayName = "Google Photos"
 
     override fun matches(url: String): Boolean =
@@ -30,19 +30,22 @@ internal object GooglePhotosSource : PhotoProvider {
     private const val IMG_WIDTH = 1280
 
     // Start of each media item: ["<AF1Qip mediaKey>",["https://lh3...
-    private val ITEM: Pattern = Pattern.compile(
-        "\\[\"AF1Qip[A-Za-z0-9_\\-]+\",\\[\"https://lh3\\.googleusercontent\\.com/",
-    )
+    private val ITEM: Pattern =
+        Pattern.compile(
+            "\\[\"AF1Qip[A-Za-z0-9_\\-]+\",\\[\"https://lh3\\.googleusercontent\\.com/",
+        )
 
     // First thumbnail (base url, width, height) within an item.
-    private val THUMB: Pattern = Pattern.compile(
-        "\"(https://lh3\\.googleusercontent\\.com/[^\"]+?)\",(\\d{2,5}),(\\d{2,5})",
-    )
+    private val THUMB: Pattern =
+        Pattern.compile(
+            "\"(https://lh3\\.googleusercontent\\.com/[^\"]+?)\",(\\d{2,5}),(\\d{2,5})",
+        )
 
     // Capture time (ms) , "mediaId" , tzOffset(ms)
-    private val DATE: Pattern = Pattern.compile(
-        ",(\\d{13}),\"[A-Za-z0-9_\\-]+\",(-?\\d{5,9}),",
-    )
+    private val DATE: Pattern =
+        Pattern.compile(
+            ",(\\d{13}),\"[A-Za-z0-9_\\-]+\",(-?\\d{5,9}),",
+        )
 
     // The only reliable POSITIVE video signal: a transcoded download URL on this
     // host. The earlier heuristics (absence of EXIF/filesize, "video-only"
@@ -50,17 +53,20 @@ internal object GooglePhotosSource : PhotoProvider {
     // album as "videos" — see isVideo().
     private const val VIDEO_MARKER = "video-downloads.googleusercontent.com"
 
-    private val SHARE_URL: Pattern = Pattern.compile(
-        "(https://photos\\.google\\.com/share/[A-Za-z0-9_\\-]+\\?key=[A-Za-z0-9_\\-]+)",
-    )
+    private val SHARE_URL: Pattern =
+        Pattern.compile(
+            "(https://photos\\.google\\.com/share/[A-Za-z0-9_\\-]+\\?key=[A-Za-z0-9_\\-]+)",
+        )
 
     // Album name from the share page's Open Graph title (content/property order varies).
-    private val OG_TITLE_A: Pattern = Pattern.compile(
-        "<meta[^>]+property=\"og:title\"[^>]+content=\"([^\"]*)\"",
-    )
-    private val OG_TITLE_B: Pattern = Pattern.compile(
-        "<meta[^>]+content=\"([^\"]*)\"[^>]+property=\"og:title\"",
-    )
+    private val OG_TITLE_A: Pattern =
+        Pattern.compile(
+            "<meta[^>]+property=\"og:title\"[^>]+content=\"([^\"]*)\"",
+        )
+    private val OG_TITLE_B: Pattern =
+        Pattern.compile(
+            "<meta[^>]+content=\"([^\"]*)\"[^>]+property=\"og:title\"",
+        )
 
     @Throws(Exception::class)
     override fun fetch(shareUrl: String): Album {
@@ -75,6 +81,19 @@ internal object GooglePhotosSource : PhotoProvider {
                 slides = parse(html)
             }
         }
+        val firstPageToken = GooglePhotosPagination.extractFirstPageToken(html)
+        if (firstPageToken != null) {
+            val request =
+                GooglePhotosPagination.extractRequest(html)
+                    ?: throw IOException("Google Photos pagination request is missing")
+            slides =
+                GooglePhotosPagination.collectSlides(
+                    firstPage = slides,
+                    firstToken = firstPageToken,
+                    fetch = { token -> fetchPage(request, token) },
+                    parse = ::parse,
+                )
+        }
         val title = parseTitle(html)
         Log.i(TAG, "Google Photos album: ${slides.size} photos, title='$title'")
         return Album(title, slides)
@@ -88,8 +107,9 @@ internal object GooglePhotosSource : PhotoProvider {
                 return ""
             }
         }
-        val t = m.group(1)!!
-            .replace("&amp;", "&").replace("&#39;", "'").replace("&quot;", "\"").trim()
+        val t =
+            m.group(1)!!
+                .replace("&amp;", "&").replace("&#39;", "'").replace("&quot;", "\"").trim()
         // The generic site title isn't an album name.
         return if (t.equals("Google Photos", ignoreCase = true)) "" else t
     }
@@ -191,23 +211,78 @@ internal object GooglePhotosSource : PhotoProvider {
             c.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
             val code = c.responseCode
             Log.i(TAG, "album http $code -> ${c.url}")
-            val `in` = BufferedInputStream(c.inputStream)
+            val inputStream = BufferedInputStream(c.inputStream)
             val bos = ByteArrayOutputStream()
             val buf = ByteArray(8192)
             var n: Int
             var total = 0
-            while (`in`.read(buf).also { n = it } != -1) {
+            while (inputStream.read(buf).also { n = it } != -1) {
                 total += n
                 if (total > MAX_HTML_BYTES) {
-                    `in`.close()
+                    inputStream.close()
                     throw IOException("album page exceeds $MAX_HTML_BYTES bytes")
                 }
                 bos.write(buf, 0, n)
             }
-            `in`.close()
+            inputStream.close()
             return bos.toString("UTF-8")
         } finally {
             c?.disconnect()
         }
     }
+
+    private fun fetchPage(
+        request: GooglePhotosPagination.Request,
+        pageToken: String,
+    ): GooglePhotosPagination.Page {
+        val sourcePath = URLEncoder.encode("/share/${request.albumKey}", "UTF-8")
+        val url = "$BATCH_EXECUTE_URL?rpcids=$BATCH_RPC_ID&source-path=$sourcePath"
+        var c: HttpURLConnection? = null
+        try {
+            c = URL(url).openConnection() as HttpURLConnection
+            c.requestMethod = "POST"
+            c.instanceFollowRedirects = true
+            c.connectTimeout = 15000
+            c.readTimeout = 20000
+            c.doOutput = true
+            c.setRequestProperty("User-Agent", ImageLoader.UA)
+            c.setRequestProperty("Content-Type", "application/x-www-form-urlencoded;charset=UTF-8")
+            c.setRequestProperty("Origin", "https://photos.google.com")
+            c.setRequestProperty(
+                "Referer",
+                "https://photos.google.com/share/${request.albumKey}?key=${request.authKey}",
+            )
+            c.outputStream.use {
+                it.write(GooglePhotosPagination.buildFormBody(request, pageToken).toByteArray(Charsets.UTF_8))
+            }
+            val code = c.responseCode
+            if (code != 200) throw IOException("Google Photos pagination http $code")
+            val body = readCapped(c.inputStream)
+            return GooglePhotosPagination.parseBatchResponse(body)
+                ?: throw IOException("couldn't parse Google Photos pagination response")
+        } finally {
+            c?.disconnect()
+        }
+    }
+
+    private fun readCapped(stream: java.io.InputStream): String {
+        BufferedInputStream(stream).use { input ->
+            val out = ByteArrayOutputStream()
+            val buf = ByteArray(8192)
+            var total = 0
+            while (true) {
+                val n = input.read(buf)
+                if (n < 0) break
+                total += n
+                if (total > MAX_HTML_BYTES) {
+                    throw IOException("Google Photos response exceeds $MAX_HTML_BYTES bytes")
+                }
+                out.write(buf, 0, n)
+            }
+            return out.toString("UTF-8")
+        }
+    }
+
+    private const val BATCH_EXECUTE_URL = "https://photos.google.com/u/0/_/PhotosUi/data/batchexecute"
+    private const val BATCH_RPC_ID = "snAcKc"
 }
