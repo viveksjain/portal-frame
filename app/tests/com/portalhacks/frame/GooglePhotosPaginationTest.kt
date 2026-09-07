@@ -137,6 +137,28 @@ class GooglePhotosPaginationTest {
     }
 
     @Test
+    fun `normalizes Android-escaped URL slashes before parsing continuation items`() {
+        var parsedJson = ""
+
+        GooglePhotosPagination.collectSlides(
+            firstPage = emptyList(),
+            firstToken = "page-2",
+            fetch = {
+                GooglePhotosPagination.Page(
+                    "[\"https:\\/\\/lh3.googleusercontent.com/photo\"]",
+                    null,
+                )
+            },
+            parse = {
+                parsedJson = it
+                emptyList()
+            },
+        )
+
+        assertEquals("[\"https://lh3.googleusercontent.com/photo\"]", parsedJson)
+    }
+
+    @Test
     fun `merges continuation pages in order without repeating photos`() {
         val first = Slide("photo-1", null)
         val repeated = Slide("photo-1", null)

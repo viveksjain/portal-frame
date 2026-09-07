@@ -161,7 +161,7 @@ internal object GooglePhotosPagination {
                 throw IOException("Google Photos pagination token repeated")
             }
             val page = fetch(token)
-            addUnique(parse(page.itemsJson))
+            addUnique(parse(page.itemsJson.replace("\\/", "/")))
             token = page.nextToken
             pageCount++
         }
