@@ -45,6 +45,21 @@ class GooglePhotosPaginationTest {
     }
 
     @Test
+    fun `accepts an empty initial continuation token as terminal`() {
+        val html =
+            """
+            <script>
+            var AF_dataServiceRequests = {
+              'ds:1': {id:'snAcKc',request:["album-key",null,null,"auth-key"]}
+            };
+            </script>
+            <script>AF_initDataCallback({key:'ds:1',data:[null,[],""],sideChannel:{}});</script>
+            """.trimIndent()
+
+        assertNull(GooglePhotosPagination.extractFirstPageToken(html))
+    }
+
+    @Test
     fun `rejects malformed pagination data from the matching callback`() {
         val html =
             """

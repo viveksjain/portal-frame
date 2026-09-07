@@ -7,6 +7,15 @@ import java.io.IOException
 import java.net.URLEncoder
 import java.util.regex.Pattern
 
+private data class ContinuationToken(val value: String?)
+
+private fun parseContinuationToken(rawToken: Any?): ContinuationToken? =
+    when {
+        rawToken == JSONObject.NULL -> ContinuationToken(null)
+        rawToken is String -> ContinuationToken(rawToken.ifEmpty { null })
+        else -> null
+    }
+
 /** Helpers for following the undocumented continuation pages of a public Google Photos album. */
 internal object GooglePhotosPagination {
     data class Request(
@@ -77,14 +86,10 @@ internal object GooglePhotosPagination {
         if (payload.length() <= 2 || payload.optJSONArray(1) == null) {
             paginationFailure("callback has an unexpected shape")
         }
-        val rawToken = payload.opt(2)
         val token =
-            when {
-                rawToken == JSONObject.NULL -> null
-                rawToken is String && rawToken.isNotEmpty() -> rawToken
-                else -> paginationFailure("callback token is malformed")
-            }
-        return InitialPage(token)
+            parseContinuationToken(payload.opt(2))
+                ?: paginationFailure("callback token is malformed")
+        return InitialPage(token.value)
     }
 
     private fun paginationFailure(
@@ -102,14 +107,8 @@ internal object GooglePhotosPagination {
             val data = JSONArray(payload)
             val items = data.optJSONArray(1) ?: return null
             if (data.length() <= 2) return null
-            val rawToken = data.opt(2)
-            val nextToken =
-                when {
-                    rawToken == JSONObject.NULL -> null
-                    rawToken is String -> rawToken.ifEmpty { null }
-                    else -> return null
-                }
-            Page(items.toString(), nextToken)
+            val token = parseContinuationToken(data.opt(2)) ?: return null
+            Page(items.toString(), token.value)
         } catch (ignored: JSONException) {
             null
         }
