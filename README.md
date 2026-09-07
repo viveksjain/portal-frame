@@ -59,16 +59,19 @@ on as the screensaver.
 
 ## ✨ Features
 
-- 🖼️ **Shared albums** — plays a **Google Photos or iCloud** shared album; new photos appear automatically.
+- 🖼️ **Shared albums** — plays complete **Google Photos or iCloud** shared albums (including
+  large, multi-page Google Photos albums) and refreshes them automatically.
 - 📱 **Add photos from a phone** — scan Frame's on-screen QR with any phone on the same Wi‑Fi, pick
   photos or paste a shared-album link in the browser, and the new content appears on the frame
   immediately. No app or account needed; individual photos go straight from your phone to the Portal.
 - 📷 **On-device setup** — **QR scan** or paste the link; no computer needed after install.
-- 🕰️ **Live overlays** — clock & weather, photo date captions, shuffle, adjustable timing and transitions.
+- 🕰️ **Live overlays** — clock, optional city-based weather in °C or °F, photo date captions,
+  shuffle, adjustable timing, and transitions.
 - 🎬 **Cinematic touches** — side-by-side portraits, pan/zoom (Ken Burns), auto-enhance, ambient color,
   night dimming, and "On This Day" memories — all toggleable.
-- 👆 **Touch controls** — **swipe** to change photo, **tap** for photo details and a temporary pause,
-  **tap again** to resume, **Close** to exit, and **long-press** to open setup.
+- 👆 **Touch controls** — **swipe** to change photo, **tap** for its date, album, source, and
+  filename when available while temporarily paused, **tap again** to resume, **Close** to exit, and
+  **long-press** to open setup.
 - ▶️ **Start anytime** — launch the slideshow on demand from Frame's setup screen, even without
   configuring Frame as the system screensaver.
 
@@ -89,7 +92,7 @@ on as the screensaver.
 | **UI** | Jetpack Compose + Android Views |
 | **SDK** | compileSdk 36 · minSdk 28 · targetSdk 29 |
 | **Build** | Gradle · JDK 17 |
-| **CI** | Android Lint + detekt + ktlint on every push/PR |
+| **CI** | JVM unit tests + Android Lint + detekt + ktlint on every push/PR |
 
 See **[CONTRIBUTING.md](CONTRIBUTING.md)** for project layout and conventions, and
 **[RELEASING.md](RELEASING.md)** for cutting a signed release (a `v*` tag builds and publishes the

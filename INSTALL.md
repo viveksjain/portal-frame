@@ -95,7 +95,8 @@ Then, on the Portal, tap **Add album**. That one screen lets you either:
   (`https://photos.app.goo.gl/…` or `https://www.icloud.com/sharedalbum/#…`) and tap **Add album**.
 
 Once set, the Album card shows the album's **title and a preview of its first photo**, so you can
-confirm it's the right one.
+confirm it's the right one. Frame follows Google Photos' continuation pages, so large shared albums
+aren't limited to the photos on the initial page.
 
 ### Or — add photos straight from your phone (no album needed)
 You can also push photos onto Frame from **any phone on the same Wi‑Fi**, without a shared album —
@@ -166,14 +167,15 @@ your photos still appear when the Portal is idle.
   the Portal sits idle if you configured it as the screensaver.
 - **Touch controls while photos are showing:**
   - **Swipe left / right** — next / previous photo
-  - **Single tap** — show the current photo's date, caption, album, and source, and pause playback
+  - **Single tap** — show the current photo's date, caption, album, and source, and pause playback;
+    Google Photos also shows the original filename when it is available
   - **Tap again** — hide the details and resume playback (details also fade after 10 seconds idle)
   - **Close** — exit the slideshow
   - **Long‑press** — open the Frame setup screen
 - **Add photos anytime.** New photos you add to the shared album (in Google Photos or iCloud) show
-  up on the Portal automatically (it re-checks each time it goes idle). Or **push a photo from your
-  phone** on the spot — scan the QR under **Add photos from a phone** and pick from your camera roll;
-  it appears on the frame right away.
+  up automatically: Frame checks when the slideshow starts and every hour while it stays open. Or
+  **push a photo from your phone** on the spot — scan the QR under **Add photos from a phone** and
+  pick from your camera roll; it appears on the frame right away.
 
 ### Settings you can change (in the Frame app)
 The setup screen has two sides: **Set up** (screensaver, albums, add photos from a phone) and
@@ -186,8 +188,11 @@ The setup screen has two sides: **Set up** (screensaver, albums, add photos from
 - **Side‑by‑side portraits** — pair two vertical photos to fill the screen.
 - **Cinematic motion** — a gentle pan/zoom on each photo.
 - **Photo captions** — show when each photo was taken (e.g. "2 months ago").
-- **Ambient intelligence** — face‑aware framing, auto‑enhance, ambient color glow, clock &
-  weather, night warmth, and "On This Day" memories. Turn any on/off to taste.
+- **Clock & weather** — turn the overlay on or off, set the **Weather city**, and choose
+  **Celsius (°C)** or **Fahrenheit (°F)**. Weather stays hidden until a city is set; clearing the
+  city turns weather off while leaving the clock available.
+- **Ambient intelligence** — face‑aware framing, auto‑enhance, ambient color glow, night warmth,
+  and "On This Day" memories. Turn any on/off to taste.
 
 ### Managing albums
 - **Multiple albums** — tap **Add album** again (scan or paste) to add more; the slideshow plays
@@ -221,6 +226,8 @@ The setup screen has two sides: **Set up** (screensaver, albums, add photos from
   Wi‑Fi** (and the network allows devices to talk to each other — some guest/public networks block
   this). Re-scan the QR from **Add photos from a phone** each session, and add photos in the browser
   page it opens (don't bookmark it — the link is single-use and only valid while that QR is shown).
+- **The clock shows no weather.** Open **Customize → Clock & night**, make sure **Clock & weather**
+  is on, and set **Weather city**. Leaving the city empty intentionally disables weather.
 - **Videos are skipped.** Frame shows photos only; videos in the album are ignored.
 - **Only sample photos show.** That means no album is set (or it couldn't be reached) — open Frame
   and add your album again.

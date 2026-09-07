@@ -25,8 +25,10 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
   ```bash
   adb shell am broadcast -n com.portalhacks.frame/.ConfigReceiver --es url "https://photos.app.goo.gl/XXXX"
   adb shell am broadcast -n com.portalhacks.frame/.ConfigReceiver --es url ""   # clear
+  adb shell am broadcast -n com.portalhacks.frame/.ConfigReceiver --es weather_city "San Francisco"
+  adb shell am broadcast -n com.portalhacks.frame/.ConfigReceiver --es temp_unit fahrenheit
   ```
-- See README for the screensaver-install commands.
+- See `INSTALL.md` for the screensaver-install steps.
 
 > `build.sh` is a **legacy** dependency-free pipeline (Java only). It predates the Compose
 > migration and will NOT build the current app. Use Gradle.
@@ -41,9 +43,10 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
   slideshow and the dream target. The Activity is Compose (`setContent`) and hosts the
   view-based `SlideshowController` via `AndroidView` (the controller's crossfade / Ken Burns
   `ValueAnimator` / `Canvas` shimmer are imperative custom animation, best kept as Views); the
-  Activity owns the album fetch/cache/refresh + night-dimming logic. Features: crossfade,
-  clock/weather overlay, captions, Ken Burns, face-aware framing, ambient color, auto-enhance,
-  night dimming, smart shuffle, On This Day, portrait pairing.
+  Activity owns the album fetch/cache/hourly refresh + night-dimming logic. Features: crossfade,
+  interactive photo details and swipe navigation, clock/city-based weather overlay, captions,
+  Ken Burns, face-aware framing, ambient color, auto-enhance, night dimming, smart shuffle,
+  On This Day, portrait pairing.
 - **`SettingsActivity`** (Kotlin/Compose) — the home-icon ("Frame") setup/settings screen: a
   two-column "Set up" / "Customize" layout (tuning grouped into collapsible sections). Hands off to
   `PhotosActivity` (scanner / manual link entry) and `UploadsActivity` (phone-pushed photos grid),
@@ -52,13 +55,20 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
 - **`PhotoProvider` / `PhotoSources`** — provider abstraction + registry. `PhotoSources.matches(url)`
   / `fetch(url)` route a link to the right provider and return a shared `Album` (title + slides).
   Add a new provider by implementing `PhotoProvider` and listing it in `PhotoSources`.
-- **`GooglePhotosSource`** — provider that scrapes the public shared-album page (the Library API is gone).
+- **`GooglePhotosSource` / `GooglePhotosPagination`** — provider that scrapes the public
+  shared-album page and follows its continuation pages (the Library API is gone).
 - **`ApplePhotosSource`** — provider for public iCloud Shared Albums via Apple's `sharedstreams`
   web API (`webstream` → `webasseturls`, handling the 330 partition redirect).
 - **`ImageLoader`** — background decode + disk/memory image cache. Also decodes locally-pushed
   photos (absolute `filesDir/uploads` paths) and applies their EXIF orientation (androidx).
 - **`AlbumCache`** — shared persistence of the fetched photo list + title in `SharedPreferences`,
   used by both the slideshow and the settings preview.
+- **Interactive slideshow state** — `PhotoDetailsOverlay` renders bounded, URL-free metadata;
+  `PhotoMetadataCache` retains Google Photos filenames learned during download;
+  `SlideshowNavigation`, `SlideshowState`, and `DetailsTimeout` keep navigation, refresh/transition,
+  weather-setting, and pause-deadline behavior independently testable.
+- **`Weather`** — resolves the configured city through Open-Meteo and fetches current conditions
+  in the explicitly selected Celsius/Fahrenheit unit; an empty city disables weather.
 - **Add photos from a phone ("AirDrop for Portal")** — a phone on the LAN scans an on-screen QR,
   its browser posts photos to the frame, and they persist in the slideshow rotation:
   - **`DropServerService`** — foreground service owning the LAN server (started from the slideshow,
@@ -82,12 +92,14 @@ adb install -r app/build/outputs/apk/debug/app-debug.apk
   non-HTTPS URLs (`network_security_config.xml`). Don't loosen this. The inbound photo-drop server
   (`LocalDropServer`) is the deliberate exception: plaintext + LAN-only + token-gated **by design**
   (it's a server socket, which the network-security config doesn't govern). See `SECURITY.md`.
-- **Static analysis runs in CI** (`lintDebug` + `detekt` + `ktlint` on every push/PR): new findings
-  fail, existing ones are grandfathered by baselines (`app/detekt-baseline.xml`,
-  `app/config/ktlint/baseline.xml`; detekt config at `config/detekt/detekt.yml`). Run
-  `./gradlew lintDebug detekt ktlintCheck` and `./gradlew ktlintFormat` before pushing.
-- The scraper regexes in `GooglePhotosSource` are intentionally tight and anchored to
-  `lh3.googleusercontent.com`; it's unofficial and must fail closed (fall back to bundled samples).
+- **Unit tests and static analysis run in CI** (`testDebugUnitTest`, `lintDebug`, `detekt`, and
+  `ktlintCheck` on every push/PR): new findings fail, existing ones are grandfathered by baselines
+  (`app/detekt-baseline.xml`, `app/config/ktlint/baseline.xml`; detekt config at
+  `config/detekt/detekt.yml`). Run `./gradlew testDebugUnitTest lintDebug detekt ktlintCheck` and
+  `./gradlew ktlintFormat` before pushing.
+- The scraper regexes in `GooglePhotosSource` / `GooglePhotosPagination` are intentionally tight;
+  photo URLs stay anchored to `lh3.googleusercontent.com`, pagination is capped and de-duplicated,
+  and the unofficial integration must fail closed rather than accept unexpected response data.
 - `ConfigReceiver` is exported (for ADB) but validates the album URL — keep that validation.
 - Do **not** commit secrets, `local.properties`, keystores, or build output (see `.gitignore`).
 - The codebase is fully Kotlin and every Activity is Compose (`setContent`). `SettingsActivity`

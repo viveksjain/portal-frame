@@ -5,16 +5,17 @@ Meta Portal. Contributions, bug reports, and ideas are welcome.
 
 ## Building
 
-The app is Android (Java + Kotlin/Jetpack Compose) and builds with Gradle:
+The app is Android (Kotlin with Jetpack Compose and Android Views) and builds with Gradle:
 
 ```bash
 ./gradlew assembleDebug
 # -> app/build/outputs/apk/debug/app-debug.apk
 ```
 
-CI runs static analysis on every push/PR — mirror it locally before you push:
+CI runs unit tests and static analysis on every push/PR — mirror it locally before you push:
 
 ```bash
+./gradlew testDebugUnitTest              # JVM unit tests
 ./gradlew lintDebug detekt ktlintCheck   # Android Lint + detekt + ktlint
 ./gradlew ktlintFormat                   # auto-fix formatting on your changes
 ```
@@ -40,25 +41,32 @@ commit one.
 
 ## Installing / testing on a Portal
 
-See the **Install & run on Portal** section of the [README](README.md). In short:
+See the [Install & User Guide](INSTALL.md). In short:
 
 ```bash
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 ```
 
-Then either launch the **Frame** app icon (setup/settings) or set it as the screensaver
-(commands in the README). The album can also be set over ADB for quick testing — see
-`ConfigReceiver` and the README.
+Then either launch the **Frame** app icon (setup/settings) or set it as the screensaver. The album,
+weather city, and temperature unit can also be set over ADB for quick testing — see
+`ConfigReceiver` and `CLAUDE.md`.
 
 ## Project layout
 
 - `app/src/com/portalhacks/frame/` — sources (all Kotlin).
-  - `SlideshowComposeActivity` / `SlideshowController` — the full-screen slideshow.
+  - `SlideshowComposeActivity` / `SlideshowController` — the full-screen slideshow, including its
+    hourly album refresh, interactive details, pause, and gesture integration.
+  - `PhotoDetailsOverlay` / `PhotoMetadataCache` — bounded photo details and downloaded Google
+    Photos filename metadata.
+  - `SlideshowNavigation` / `SlideshowState` / `DetailsTimeout` — testable navigation,
+    refresh/transition/weather state, and details timing helpers.
   - `FrameDreamService` — the screensaver trampoline that launches the slideshow.
   - `SettingsActivity` (Compose) — the home-screen setup/settings UI.
   - `PhotosActivity` (Android Views) — camera QR scanner + manual link entry.
   - `PhotoProvider` / `PhotoSources` — provider abstraction + registry (route a link → `Album`).
-  - `GooglePhotosSource`, `ApplePhotosSource` — the providers.
+  - `GooglePhotosSource` / `GooglePhotosPagination`, `ApplePhotosSource` — the providers; Google
+    Photos continuation pages are fetched, capped, and de-duplicated.
+  - `Weather` — Open-Meteo city lookup and current conditions in the configured temperature unit.
   - `ImageLoader` / `AlbumCache` — decoding/caching and the persisted photo cache. `ImageLoader`
     also decodes locally-pushed photos and honours their EXIF orientation.
   - **Add photos from a phone** ("AirDrop for Portal"): `DropServerService` runs a foreground
@@ -77,8 +85,8 @@ Then either launch the **Frame** app icon (setup/settings) or set it as the scre
   Keep the dark Portal palette/typography (`Ui` / `PortalColors`).
 - **Adding a photo provider:** implement `PhotoProvider` (`matches` + `fetch` → `Album`) and add it
   to the `PhotoSources` list. Don't special-case a provider in the UI — it routes by URL.
-- Providers are unofficial (they use public share endpoints) — fail closed (return empty / throw so
-  callers fall back to bundled samples), and only fetch over **HTTPS** (see `SECURITY.md`).
+- Providers are unofficial (they use public share endpoints) — fail closed (return empty / throw
+  rather than accepting unexpected data), and only fetch over **HTTPS** (see `SECURITY.md`).
 
 ## Pull requests
 
