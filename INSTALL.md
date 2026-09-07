@@ -104,12 +104,15 @@ handy for adding a few photos on the spot:
 1. On the Portal's setup screen, find **Add photos from a phone**. It shows a **QR code**.
 2. On your phone, **scan that QR** with the camera app. It opens a simple web page in your browser —
    there's **no app to install**.
-3. Tap **Choose photos**, pick photos from your camera roll, and tap **Add to Frame**.
+3. To send individual photos, tap **Choose photos**, pick from your camera roll, and tap
+   **Add to Frame**.
+4. To add a shared album instead, paste its Google Photos or iCloud link under
+   **Add a shared album** and tap **Add album**.
 
 They appear on the frame **right away** and stay in the rotation, alongside any albums. Because it's
 just your phone's browser, it works from an **iPhone or Android**, and **nothing goes to any cloud** —
 the photos travel directly from your phone to the Portal over your home Wi‑Fi. Only a phone that
-scanned the on-screen QR can add photos.
+scanned the on-screen QR can add photos or albums.
 
 > **Manage them:** the **Photos from phones** card on the setup screen shows how many you've added;
 > tap **Manage photos** to see them all in a grid and **delete** any (or **Remove all**).

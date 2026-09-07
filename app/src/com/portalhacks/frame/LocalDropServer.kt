@@ -18,8 +18,9 @@ import java.util.concurrent.atomic.AtomicBoolean
  * its camera roll (the browser's native file picker), and they appear on the frame — no
  * app, no account, no cloud.
  *
- * `GET /` serves the upload page; `POST /upload` saves the posted image(s) into
- * [LocalUploads] and calls [onUpload] so the slideshow can show them immediately. The
+ * `GET /` serves the phone page; `POST /upload` saves posted images into [LocalUploads],
+ * while `POST /album` adds a supported shared-album URL. Both notify the app so the
+ * slideshow can show the new content immediately. The
  * server is plaintext and LAN-only **by design** (the photos already traverse the home
  * network; there are no credentials). Uploads are size-capped and must decode as a known
  * image type, and the client's filename is never used as a path — we mint our own.
@@ -31,6 +32,7 @@ class LocalDropServer(
     context: Context,
     private val token: String,
     private val onUpload: () -> Unit,
+    private val onAlbumAdded: () -> Unit,
 ) {
     private val ctx = context.applicationContext
     private val running = AtomicBoolean(false)
@@ -146,16 +148,7 @@ class LocalDropServer(
             val authed = DropAuth.matches(token, queryParam(target, "k"))
             val headers = parseHeaders(lines)
 
-            when {
-                method == "GET" && (path == "/" || path == "/index.html") ->
-                    if (authed) respond(out, 200, HTML, page(null))
-                    else respond(out, 403, HTML, FORBIDDEN.toByteArray())
-                method == "POST" && path == "/upload" ->
-                    if (authed) handleUpload(input, headers, out)
-                    else respond(out, 403, HTML, FORBIDDEN.toByteArray())
-                else ->
-                    respond(out, 404, "text/plain; charset=utf-8", "not found".toByteArray())
-            }
+            route(method, path, authed, input, headers, out)
             out.flush()
         } catch (e: Exception) {
             Log.w(TAG, "connection error", e)
@@ -164,6 +157,90 @@ class LocalDropServer(
                 sock.close()
             } catch (_: IOException) {
             }
+        }
+    }
+
+    private fun route(
+        method: String,
+        path: String,
+        authed: Boolean,
+        input: BufferedInputStream,
+        headers: Map<String, String>,
+        out: OutputStream,
+    ) {
+        when (method) {
+            "GET" -> handleGet(path, authed, out)
+            "POST" -> handlePost(path, authed, input, headers, out)
+            else -> respondNotFound(out)
+        }
+    }
+
+    private fun handleGet(
+        path: String,
+        authed: Boolean,
+        out: OutputStream,
+    ) {
+        if (path != "/" && path != "/index.html") {
+            respondNotFound(out)
+            return
+        }
+        if (authed) {
+            respond(out, 200, HTML, page())
+        } else {
+            respond(out, 403, HTML, FORBIDDEN.toByteArray())
+        }
+    }
+
+    private fun handlePost(
+        path: String,
+        authed: Boolean,
+        input: BufferedInputStream,
+        headers: Map<String, String>,
+        out: OutputStream,
+    ) {
+        when (path) {
+            "/upload" -> if (authed) handleUpload(input, headers, out) else respondForbidden(out)
+            "/album" -> if (authed) handleAlbum(input, headers, out) else respondForbidden(out)
+            else -> respondNotFound(out)
+        }
+    }
+
+    private fun respondForbidden(out: OutputStream) = respond(out, 403, HTML, FORBIDDEN.toByteArray())
+
+    private fun respondNotFound(out: OutputStream) = respond(out, 404, "text/plain", "not found".toByteArray())
+
+    private fun handleAlbum(
+        input: BufferedInputStream,
+        headers: Map<String, String>,
+        out: OutputStream,
+    ) {
+        val contentType = headers["content-type"] ?: ""
+        val length = headers["content-length"]?.toIntOrNull() ?: -1
+        if (!contentType.startsWith("application/x-www-form-urlencoded") ||
+            length <= 0 || length > MAX_ALBUM_BODY_BYTES
+        ) {
+            respond(out, 400, HTML, page(albumMessage = INVALID_ALBUM_MESSAGE, albumError = true))
+            return
+        }
+        val body = readBody(input, length)
+        if (body == null) {
+            respond(out, 400, HTML, page(albumMessage = INVALID_ALBUM_MESSAGE, albumError = true))
+            return
+        }
+        val prefs = ctx.getSharedPreferences(ConfigReceiver.PREFS, Context.MODE_PRIVATE)
+        when (AlbumSubmission.process(body, PhotoSources::matches) { Albums.add(prefs, it) }) {
+            AlbumSubmission.Result.ADDED -> {
+                try {
+                    onAlbumAdded()
+                } catch (e: Exception) {
+                    Log.w(TAG, "onAlbumAdded callback failed", e)
+                }
+                respond(out, 200, HTML, page(albumMessage = "Album added — it will appear on the frame shortly."))
+            }
+            AlbumSubmission.Result.DUPLICATE ->
+                respond(out, 200, HTML, page(albumMessage = "That album is already on the frame."))
+            AlbumSubmission.Result.INVALID ->
+                respond(out, 400, HTML, page(albumMessage = INVALID_ALBUM_MESSAGE, albumError = true))
         }
     }
 
@@ -274,7 +351,7 @@ class LocalDropServer(
     /** Render the result page with the message, plus machine-readable headers for the JS path. */
     private fun respondUpload(out: OutputStream, status: Int, added: Int, rejected: Int, reason: String, message: String) {
         val extra = "X-Frame-Added: $added\r\nX-Frame-Rejected: $rejected\r\nX-Frame-Reason: $reason\r\n"
-        respond(out, status, HTML, page(message), extra)
+        respond(out, status, HTML, page(uploadMessage = message), extra)
     }
 
     /** Read request bytes up to and including the blank-line header terminator (CRLF CRLF). */
@@ -361,11 +438,18 @@ class LocalDropServer(
         return null
     }
 
-    /** The upload page with the token injected into the form action and an optional message. */
-    private fun page(message: String?): ByteArray {
+    /** The phone page with the token injected into both actions and optional result messages. */
+    private fun page(
+        uploadMessage: String? = null,
+        albumMessage: String? = null,
+        albumError: Boolean = false,
+    ): ByteArray {
         return PAGE
-            .replace(ACTION_SLOT, "/upload?k=$token")
-            .replace(SLOT, message ?: "")
+            .replace(UPLOAD_ACTION_SLOT, "/upload?k=$token")
+            .replace(ALBUM_ACTION_SLOT, "/album?k=$token")
+            .replace(UPLOAD_MESSAGE_SLOT, uploadMessage ?: "")
+            .replace(ALBUM_MESSAGE_SLOT, albumMessage ?: "")
+            .replace(ALBUM_ERROR_SLOT, if (albumError) " err" else "")
             .toByteArray()
     }
 
@@ -378,14 +462,20 @@ class LocalDropServer(
         private val PORTS = listOf(8080, 8088, 8888, 8181, 0) // 0 = any free port as last resort
 
         private const val MAX_HEAD_BYTES = 64 * 1024
+        private const val MAX_ALBUM_BODY_BYTES = 8 * 1024
         // Cap a whole multipart POST (a few photos) so a hostile client can't exhaust memory/disk.
         private const val MAX_BODY_BYTES = 32 * 1024 * 1024
         // How many uploads may buffer in memory at once (worst case ~MAX_BODY_BYTES each + a copy).
         private const val MAX_CONCURRENT_UPLOADS = 2
 
-        private const val SLOT = "<!--SLOT-->"
-        private const val ACTION_SLOT = "__ACTION__"
+        private const val UPLOAD_MESSAGE_SLOT = "<!--UPLOAD_MESSAGE-->"
+        private const val ALBUM_MESSAGE_SLOT = "<!--ALBUM_MESSAGE-->"
+        private const val ALBUM_ERROR_SLOT = "__ALBUM_ERROR__"
+        private const val UPLOAD_ACTION_SLOT = "__UPLOAD_ACTION__"
+        private const val ALBUM_ACTION_SLOT = "__ALBUM_ACTION__"
         private const val HTML = "text/html; charset=utf-8"
+        private const val INVALID_ALBUM_MESSAGE =
+            "Paste a Google Photos or iCloud shared-album link and try again."
 
         // Cap concurrent connections so a flood can't exhaust threads/memory.
         private const val MAX_CONNECTIONS = 16
@@ -409,21 +499,28 @@ class LocalDropServer(
             <!doctype html><html lang="en"><head>
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-            <title>Add photos to Frame</title>
+            <title>Add to Frame</title>
             <style>
               :root { color-scheme: dark; }
               * { box-sizing: border-box; }
               body { margin:0; min-height:100vh; display:flex; flex-direction:column;
-                align-items:center; justify-content:center; gap:20px; padding:28px;
+                align-items:center; justify-content:center; gap:18px; padding:28px;
                 font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
                 background:#0d0f12; color:#f3f4f6; }
               h1 { font-size:26px; margin:0; font-weight:650; text-align:center; }
+              h2 { font-size:21px; margin:0; font-weight:650; text-align:center; }
               .sub { margin:0; color:#9aa2ad; font-size:16px; text-align:center; max-width:32ch; }
               .msg { color:#7fd1a0; font-size:18px; font-weight:600; text-align:center; max-width:34ch; }
               .msg:empty { display:none; }
               .msg.err { color:#f0a3a3; }
               form { width:100%; max-width:420px; display:flex; flex-direction:column; gap:16px; }
+              .divider { width:100%; max-width:420px; border:0; border-top:1px solid #2c323b;
+                margin:8px 0; }
               input[type=file] { display:none; }
+              input[type=url] { width:100%; min-height:56px; border-radius:14px;
+                border:1.5px solid #2c323b; background:#1b1f25; color:#f3f4f6;
+                padding:0 16px; font-size:16px; }
+              input[type=url]::placeholder { color:#7f8792; }
               .btn { display:flex; align-items:center; justify-content:center;
                 min-height:64px; border-radius:18px; font-size:19px; font-weight:600;
                 border:none; text-decoration:none; cursor:pointer; }
@@ -438,11 +535,12 @@ class LocalDropServer(
                 border-top-color:#4c8bf5; animation:spin 0.8s linear infinite; flex:none; }
               @keyframes spin { to { transform:rotate(360deg); } }
             </style></head><body>
-              <h1>Add photos to Frame</h1>
+              <h1>Add to Frame</h1>
+              <h2>Add photos</h2>
               <p class="sub">Pick photos from this phone &mdash; they&rsquo;ll appear on the frame
                 right away. No app or account needed.</p>
-              <div class="msg" id="msg" role="status" aria-live="polite"><!--SLOT--></div>
-              <form id="f" method="post" action="__ACTION__" enctype="multipart/form-data">
+              <div class="msg" id="uploadMsg" role="status" aria-live="polite"><!--UPLOAD_MESSAGE--></div>
+              <form id="f" method="post" action="__UPLOAD_ACTION__" enctype="multipart/form-data">
                 <label class="btn pick" for="file">Choose photos</label>
                 <input id="file" name="file" type="file" accept="image/*" multiple>
                 <div class="count" id="count" role="status" aria-live="polite"></div>
@@ -451,16 +549,25 @@ class LocalDropServer(
               <div class="status" id="status" role="status" aria-live="polite" hidden>
                 <span class="spin" aria-hidden="true"></span><span id="statusText">Sending&hellip;</span>
               </div>
+              <hr class="divider">
+              <h2>Add a shared album</h2>
+              <p class="sub">Paste a Google Photos or iCloud shared-album link.</p>
+              <div class="msg__ALBUM_ERROR__" id="albumMsg" role="status" aria-live="polite"><!--ALBUM_MESSAGE--></div>
+              <form method="post" action="__ALBUM_ACTION__">
+                <input name="url" type="url" inputmode="url" autocomplete="off"
+                  placeholder="https://photos.app.goo.gl/…" aria-label="Shared album URL" required>
+                <button class="btn send" type="submit">Add album</button>
+              </form>
               <script>
                 function byId(i){return document.getElementById(i);}
                 var file=byId('file'),send=byId('send'),count=byId('count'),f=byId('f'),
-                    msg=byId('msg'),statusEl=byId('status'),statusText=byId('statusText');
+                    msg=byId('uploadMsg'),statusEl=byId('status'),statusText=byId('statusText');
                 file.addEventListener('change',function(){
                   var n=file.files.length; send.disabled=n===0; send.textContent='Add to Frame';
                   count.textContent=n?(n+(n===1?' photo selected':' photos selected')):'';
                 });
                 function extractMsg(html){
-                  var m=html.match(/id="msg"[^>]*>([\s\S]*?)<\/div>/);
+                  var m=html.match(/id="uploadMsg"[^>]*>([\s\S]*?)<\/div>/);
                   return m?m[1].trim():'';
                 }
                 if(window.fetch&&window.FormData){

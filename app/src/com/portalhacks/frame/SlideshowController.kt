@@ -214,30 +214,6 @@ class SlideshowController(
         // bottom — so "2 months ago" lines up with the clock's "Sun, Jun 14" date line.
         val clockBottom = Ui.dp(context, 95f)
 
-        // Gradient scrims so the white system-overlay pills (top) and our caption
-        // text (bottom) stay legible over bright photos — per the Portal design rules.
-        val topScrim = View(context)
-        topScrim.background = GradientDrawable(
-            GradientDrawable.Orientation.TOP_BOTTOM,
-            intArrayOf(0x99000000.toInt(), 0x00000000),
-        )
-        val tsp = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, Ui.dp(context, 96f),
-        )
-        tsp.gravity = Gravity.TOP
-        topScrim.layoutParams = tsp
-
-        val bottomScrim = View(context)
-        bottomScrim.background = GradientDrawable(
-            GradientDrawable.Orientation.BOTTOM_TOP,
-            intArrayOf(0xB3000000.toInt(), 0x00000000),
-        )
-        val bsp = FrameLayout.LayoutParams(
-            FrameLayout.LayoutParams.MATCH_PARENT, Ui.dp(context, 150f),
-        )
-        bsp.gravity = Gravity.BOTTOM
-        bottomScrim.layoutParams = bsp
-
         // Loading / error hint — moved to the top so it doesn't fight the clock.
         status = TextView(context)
         status.setTextColor(Ui.TEXT_MUTED)
@@ -472,8 +448,6 @@ class SlideshowController(
         root.addView(ambientGlow)
         root.addView(nightTint)
         root.addView(shimmer)
-        root.addView(topScrim)
-        root.addView(bottomScrim)
         root.addView(status)
         root.addView(info)
         root.addView(clockBox)

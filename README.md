@@ -61,8 +61,8 @@ on as the screensaver.
 
 - 🖼️ **Shared albums** — plays a **Google Photos or iCloud** shared album; new photos appear automatically.
 - 📱 **Add photos from a phone** — scan Frame's on-screen QR with any phone on the same Wi‑Fi, pick
-  photos from your camera roll in the browser, and they appear on the frame instantly and stay in the
-  rotation. No app, no account, no cloud — the photos go straight from your phone to the Portal.
+  photos or paste a shared-album link in the browser, and the new content appears on the frame
+  immediately. No app or account needed; individual photos go straight from your phone to the Portal.
 - 📷 **On-device setup** — **QR scan** or paste the link; no computer needed after install.
 - 🕰️ **Live overlays** — clock & weather, photo date captions, shuffle, adjustable timing and transitions.
 - 🎬 **Cinematic touches** — side-by-side portraits, pan/zoom (Ken Burns), auto-enhance, ambient color,

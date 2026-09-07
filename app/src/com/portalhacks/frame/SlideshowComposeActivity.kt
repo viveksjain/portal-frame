@@ -47,11 +47,15 @@ class SlideshowComposeActivity : ComponentActivity() {
     private var currentIds: List<String> = ArrayList()
     private var isForeground = false
 
-    // Refresh the slideshow immediately when the always-on drop service receives a photo.
+    // Refresh the slideshow immediately when the LAN page receives a photo or album.
     private var uploadReceiverRegistered = false
     private val uploadReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, i: Intent?) {
-            onLocalUploadChanged()
+            if (i?.action == DropServerService.ACTION_ALBUM_ADDED) {
+                onAlbumAdded()
+            } else {
+                onLocalUploadChanged()
+            }
         }
     }
 
@@ -163,7 +167,11 @@ class SlideshowComposeActivity : ComponentActivity() {
         DropServerService.start(this)
         if (!uploadReceiverRegistered) {
             ContextCompat.registerReceiver(
-                this, uploadReceiver, IntentFilter(DropServerService.ACTION_UPLOAD),
+                this,
+                uploadReceiver,
+                IntentFilter(DropServerService.ACTION_UPLOAD).apply {
+                    addAction(DropServerService.ACTION_ALBUM_ADDED)
+                },
                 ContextCompat.RECEIVER_NOT_EXPORTED,
             )
             uploadReceiverRegistered = true
@@ -233,6 +241,16 @@ class SlideshowComposeActivity : ComponentActivity() {
         } else {
             controller.setItems(merged)
         }
+    }
+
+    /** Start fetching an album as soon as it is submitted from the LAN web page. */
+    private fun onAlbumAdded() {
+        if (!isForeground || !::controller.isInitialized) return
+        val prefs = getSharedPreferences(ConfigReceiver.PREFS, MODE_PRIVATE)
+        val albums = Albums.enabled(prefs)
+        if (albums == currentAlbums) return
+        currentAlbums = albums
+        fetchAllAndApply(showHint = true)
     }
 
     private val refreshTick = object : Runnable {

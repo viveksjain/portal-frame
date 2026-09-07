@@ -24,9 +24,12 @@ class DropServerService : Service() {
         super.onCreate()
         startForeground(NOTI_ID, buildNotification())
         val token = DropAuth.token(this)
-        server = LocalDropServer(this, token) {
-            sendBroadcast(Intent(ACTION_UPLOAD).setPackage(packageName))
-        }.also { it.start() }
+        server = LocalDropServer(
+            this,
+            token,
+            onUpload = { sendBroadcast(Intent(ACTION_UPLOAD).setPackage(packageName)) },
+            onAlbumAdded = { sendBroadcast(Intent(ACTION_ALBUM_ADDED).setPackage(packageName)) },
+        ).also { it.start() }
         Log.i(TAG, "drop server service started")
     }
 
@@ -62,6 +65,7 @@ class DropServerService : Service() {
 
         /** App-internal broadcast sent after photo(s) are pushed; carries no data. */
         const val ACTION_UPLOAD = "com.portalhacks.frame.UPLOAD"
+        const val ACTION_ALBUM_ADDED = "com.portalhacks.frame.ALBUM_ADDED"
 
         /** Start (or no-op if already running) the always-on drop server. */
         fun start(ctx: Context) {

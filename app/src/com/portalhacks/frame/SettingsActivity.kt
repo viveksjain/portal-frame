@@ -87,13 +87,17 @@ class SettingsActivity : ComponentActivity() {
     // manual entry (the album may have changed there).
     private val resumeTick = mutableIntStateOf(0)
 
-    // Bumped when a photo arrives over the LAN while this screen is open, so the
-    // "Photos added from phones" list refreshes immediately (DropServerService broadcasts).
+    // Bumped when content arrives over the LAN while this screen is open, so its relevant
+    // album or local-photo section refreshes immediately (DropServerService broadcasts).
     private val uploadTick = mutableIntStateOf(0)
     private var uploadReceiverRegistered = false
     private val uploadReceiver = object : BroadcastReceiver() {
         override fun onReceive(c: Context?, i: Intent?) {
-            uploadTick.intValue++
+            if (i?.action == DropServerService.ACTION_ALBUM_ADDED) {
+                resumeTick.intValue++
+            } else {
+                uploadTick.intValue++
+            }
         }
     }
 
@@ -104,7 +108,11 @@ class SettingsActivity : ComponentActivity() {
         ScreensaverGuardService.startIfEnabled(this)
         if (!uploadReceiverRegistered) {
             ContextCompat.registerReceiver(
-                this, uploadReceiver, IntentFilter(DropServerService.ACTION_UPLOAD),
+                this,
+                uploadReceiver,
+                IntentFilter(DropServerService.ACTION_UPLOAD).apply {
+                    addAction(DropServerService.ACTION_ALBUM_ADDED)
+                },
                 ContextCompat.RECEIVER_NOT_EXPORTED,
             )
             uploadReceiverRegistered = true
