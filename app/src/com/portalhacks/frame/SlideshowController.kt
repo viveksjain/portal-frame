@@ -2162,7 +2162,7 @@ class SlideshowController(
         private const val TAP_SLOP = 30f
         private const val TAP_TIMEOUT_MS = 350L
         private const val LONG_PRESS_MS = 700L // hold to open Photos setup
-        private const val WEATHER_INTERVAL_MS = 60 * 60 * 1000L // refresh weather hourly
+        private const val WEATHER_INTERVAL_MS = 30 * 60 * 1000L // refresh weather every 30 min
         private const val FORTUNE_INTERVAL_MS = 60 * 60 * 1000L // a fresh wisdom line each hour
 
         /**

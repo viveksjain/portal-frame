@@ -318,7 +318,7 @@ class SlideshowComposeActivity : ComponentActivity() {
         const val EXTRA_FROM_DREAM = "from_dream"
 
         private const val TAG = "PortalFrame"
-        private const val REFRESH_INTERVAL_MS = 20 * 60 * 1000L // 20 min
+        private const val REFRESH_INTERVAL_MS = 60 * 60 * 1000L // refresh albums hourly
 
         // Lux thresholds for clock-only mode, with hysteresis to avoid flicker near the edge.
         private const val LOW_LUX = 8f
