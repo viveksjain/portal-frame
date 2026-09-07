@@ -76,13 +76,16 @@ class GooglePhotosPaginationTest {
     }
 
     @Test
-    fun `accepts only null as a terminal continuation token`() {
-        val terminal = GooglePhotosPagination.parseBatchResponse(batchResponse("[null,[],null]"))
+    fun `accepts null or an empty string as a terminal continuation token`() {
+        val nullTerminal = GooglePhotosPagination.parseBatchResponse(batchResponse("[null,[],null]"))
+        val emptyTerminal = GooglePhotosPagination.parseBatchResponse(batchResponse("[null,[],\"\"]"))
 
-        assertNull(terminal?.nextToken)
-        assertEquals("[]", terminal?.itemsJson)
+        assertNull(nullTerminal?.nextToken)
+        assertEquals("[]", nullTerminal?.itemsJson)
+        assertNull(emptyTerminal?.nextToken)
+        assertEquals("[]", emptyTerminal?.itemsJson)
 
-        for (payload in listOf("[null,[]]", "[null,[],\"\"]", "[null,[],7]")) {
+        for (payload in listOf("[null,[]]", "[null,[],7]")) {
             assertNull(GooglePhotosPagination.parseBatchResponse(batchResponse(payload)))
         }
     }

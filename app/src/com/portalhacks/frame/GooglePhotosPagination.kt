@@ -106,7 +106,7 @@ internal object GooglePhotosPagination {
             val nextToken =
                 when {
                     rawToken == JSONObject.NULL -> null
-                    rawToken is String && rawToken.isNotEmpty() -> rawToken
+                    rawToken is String -> rawToken.ifEmpty { null }
                     else -> return null
                 }
             Page(items.toString(), nextToken)
